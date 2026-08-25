@@ -40,7 +40,7 @@ APP_NAME="Gradle"
 APP_HOME=$( cd "${APP_HOME}" && pwd -P ) || exit
 
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+DEFAULT_JVM_OPTS='-Xmx64m -Xms64m'
 
 # Use the maximum available, or set MAX_FD != maximum.
 MAX_FD=maximum
@@ -109,7 +109,7 @@ fi
 
 # For Darwin, add options to specify how the application appears in the dock
 if $darwin; then
-    DEFAULT_JVM_OPTS="$DEFAULT_JVM_OPTS \"-XX:+UseStringDeduplication\""
+    DEFAULT_JVM_OPTS="$DEFAULT_JVM_OPTS -XX:+UseStringDeduplication"
 fi
 
 # Collect all arguments for the java command, stacking in reverse order:
@@ -140,7 +140,7 @@ eval "set -- $APP_ARGS"
 #
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 #
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+DEFAULT_JVM_OPTS='-Xmx64m -Xms64m'
 
 # Collect all arguments for the java command;
 #   * $DEFAULT_JVM_OPTS, $JAVA_OPTS, and $GRADLE_OPTS can contain fragments of shell commands/options
