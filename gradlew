@@ -108,7 +108,7 @@ fi
 
 # For Darwin, add options to specify how the application appears in the dock
 if [ "$darwin" = "true" ] ; then
-    GRADLE_OPTS="$GRADLE_OPTS \"\-Xdock:name=$APP_NAME\" \"\-Xdock:icon=$APP_HOME/media/gradle.icns\""
+    GRADLE_OPTS="$GRADLE_OPTS \"-Xdock:name=$APP_NAME\" \"-Xdock:icon=$APP_HOME/media/gradle.icns\""
 fi
 
 # For Cygwin or MSYS, switch paths to Windows format before running java
@@ -171,17 +171,17 @@ APP_ARGS=`save "$@"`
 #   * --module-path (only if needed)
 #   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
 
-DEFAULT_JVM_OPTS='\"\-Xmx64m\" \"\-Xms64m\"'
+DEFAULT_JVM_OPTS='-Xmx64m -Xms64m'
 JAVA_OPTS=`echo "$JAVA_OPTS" | tr '\n' ' '`
 GRADLE_OPTS=`echo "$GRADLE_OPTS" | tr '\n' ' '`
 JVM_OPTS="$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS"
-JVM_OPTS="$JVM_OPTS $([ -z "$APP_HOME" ] || printf '%s\n' \"-Dorg.gradle.appname=$APP_NAME\")"
+JVM_OPTS="$JVM_OPTS $([ -z "$APP_HOME" ] || printf '%s\n' "-Dorg.gradle.appname=$APP_NAME")"
 
 # Use the maximum available, or set MAX_FD != maximum.
 MAX_FD=maximum
 
 # Process the current working directory in case there are issues with the way the script is being invoked
-APP_HOME=$(cd "$(dirname \"${BASH_SOURCE[0]}\")" && pwd)
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
 
 # Use the maximum available, or set MAX_FD != maximum.
 exec "$JAVACMD" $JVM_OPTS -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
