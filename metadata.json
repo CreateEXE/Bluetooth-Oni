@@ -1,0 +1,6 @@
+{
+  "name": "Oni Song Tracker",
+  "description": "Locate and track nearby Bluetooth devices with radar and compass views.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
