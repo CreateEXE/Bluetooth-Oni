@@ -35,6 +35,7 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
     val userAzimuth by viewModel.userAzimuth.collectAsState()
     val userPitch by viewModel.userPitch.collectAsState()
     val userRoll by viewModel.userRoll.collectAsState()
+    val estimatedBearings by viewModel.estimatedBearings.collectAsState()
     
     var showSettingsDialog by remember { mutableStateOf(false) }
 
@@ -154,6 +155,23 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
                         radius = 16f,
                         center = center
                     )
+                    
+                    // Draw Target Indicator if estimated
+                    val estimatedBearing = estimatedBearings[target.macAddress]
+                    if (estimatedBearing != null) {
+                        rotate(degrees = estimatedBearing, pivot = center) {
+                            val targetPath = Path().apply {
+                                moveTo(center.x, center.y - (size.width / 2) * 1.1f)
+                                lineTo(center.x + 15f, center.y - (size.width / 2) * 0.9f)
+                                lineTo(center.x - 15f, center.y - (size.width / 2) * 0.9f)
+                                close()
+                            }
+                            drawPath(
+                                path = targetPath,
+                                color = Color.Green.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
                 }
                 
                 // Floating indicators in 3D space
@@ -200,8 +218,14 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
             
             Spacer(modifier = Modifier.height(64.dp))
             
+            val isEstimated = estimatedBearings.containsKey(target.macAddress)
+            val instructionText = if (isEstimated) {
+                "Distance stabilized with EMA smoothing.\nGreen arrow shows estimated direction based on your movement history (Trilateration).\nKeep moving to improve accuracy."
+            } else {
+                "Distance stabilized with EMA smoothing.\nWalk around slowly with the device to calibrate the trilateration tracking algorithm and estimate direction."
+            }
             Text(
-                "Standard BLE cannot determine physical direction.\nThe 3D compass tracks your phone's gyroscope.\nUse the expanding proximity pulse to find the device (Hot/Cold).",
+                instructionText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(32.dp),

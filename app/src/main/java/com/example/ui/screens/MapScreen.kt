@@ -40,11 +40,6 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel) {
             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Info, contentDescription = "Info", tint = MaterialTheme.colorScheme.onSecondaryContainer)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Radar Map: Standard BLE cannot determine physical direction without special hardware. Devices are placed circularly for visual separation only. Distance (radius) is real.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
             }
         }
         
@@ -107,6 +102,13 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel) {
                     )
                 }
                 
+                // Draw user (below devices)
+                drawCircle(
+                    color = Color.Blue,
+                    radius = 24f,
+                    center = center
+                )
+
                 // Draw current devices dots
                 devices.forEach { device ->
                     val distanceRatio = (device.distanceMeters / maxDisplayDistance).coerceIn(0.0, 1.0)
@@ -127,14 +129,18 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel) {
                     )
                 }
                 
-                // Draw user
-                drawCircle(
-                    color = Color.Blue,
-                    radius = 24f,
-                    center = center
-                )
             }
             
+            Text(
+                "You",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(Color.Blue, CircleShape)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .align(Alignment.Center)
+            )
+
             // Draw HTML-like overlay for labels
             if (boxWidth > 0 && boxHeight > 0) {
                 val center = Offset(boxWidth / 2, boxHeight / 2)
@@ -172,15 +178,6 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel) {
                 }
             }
             
-            Text(
-                "You",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .background(Color.Blue, CircleShape)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .align(Alignment.Center)
-            )
         }
     }
 }

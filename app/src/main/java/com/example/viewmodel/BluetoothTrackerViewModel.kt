@@ -72,16 +72,80 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val _deviceHistory = MutableStateFlow<List<DeviceLocationEntity>>(emptyList())
     val deviceHistory = _deviceHistory.asStateFlow()
 
+    // EMA smoothing for RSSI precision
+    private val smoothedRssiMap = mutableMapOf<String, Double>()
+    private val smoothingFactor = 0.15
+    
+    // Direction estimation based on movement
+    private val _estimatedBearings = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val estimatedBearings = _estimatedBearings.asStateFlow()
+    private val previousDistances = mutableMapOf<String, Double>()
+
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             super.onScanResult(callbackType, result)
             val device = result.device
-            val rssi = result.rssi
+            val rawRssi = result.rssi
             val address = device.address
             val name = device.name ?: "Unknown Device"
             
-            val distance = GeoUtils.calculateDistance(rssi)
+            // Apply Exponential Moving Average (EMA) to smooth RSSI
+            val currentSmoothed = smoothedRssiMap[address]
+            val finalRssi = if (currentSmoothed != null) {
+                (smoothingFactor * rawRssi) + ((1.0 - smoothingFactor) * currentSmoothed)
+            } else {
+                rawRssi.toDouble()
+            }
+            smoothedRssiMap[address] = finalRssi
+            
+            // Calculate distance based on smoothed RSSI
+            val distance = GeoUtils.calculateDistance(finalRssi.toInt())
+            
+            // Pseudo-Direction Estimation Heuristic (Hot/Cold Trilateration over time)
+            val prevDist = previousDistances[address]
+            if (prevDist != null) {
+                val delta = distance - prevDist
+                // If moving significantly closer, the device is likely in the direction the user is currently facing
+                if (delta < -0.1) {
+                    val currentBearings = _estimatedBearings.value.toMutableMap()
+                    val existingBearing = currentBearings[address]
+                    val currentAzimuth = _userAzimuth.value
+                    
+                    val newBearing = if (existingBearing != null) {
+                        var diff = currentAzimuth - existingBearing
+                        while (diff < -180) diff += 360
+                        while (diff > 180) diff -= 360
+                        existingBearing + (diff * 0.2f) // Slowly pull bearing towards current facing direction
+                    } else {
+                        currentAzimuth
+                    }
+                    currentBearings[address] = newBearing
+                    _estimatedBearings.value = currentBearings
+                } 
+                // If moving away, device is likely behind the user
+                else if (delta > 0.15) {
+                     val currentBearings = _estimatedBearings.value.toMutableMap()
+                     val existingBearing = currentBearings[address]
+                     var oppositeAzimuth = _userAzimuth.value + 180f
+                     if (oppositeAzimuth > 360f) oppositeAzimuth -= 360f
+                     
+                     val newBearing = if (existingBearing != null) {
+                        var diff = oppositeAzimuth - existingBearing
+                        while (diff < -180) diff += 360
+                        while (diff > 180) diff -= 360
+                        existingBearing + (diff * 0.1f)
+                    } else {
+                        oppositeAzimuth
+                    }
+                    currentBearings[address] = newBearing
+                    _estimatedBearings.value = currentBearings
+                }
+            }
+            previousDistances[address] = distance
+
+            val rssi = finalRssi.toInt()
+
             val majorClass = device.bluetoothClass?.majorDeviceClass ?: android.bluetooth.BluetoothClass.Device.Major.UNCATEGORIZED
             val isConnectable = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 result.isConnectable
