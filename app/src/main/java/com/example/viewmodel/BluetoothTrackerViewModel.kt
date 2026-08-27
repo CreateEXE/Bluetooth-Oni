@@ -36,6 +36,14 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
 
     private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+    private val magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+    private val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+
+    private val _emfFieldStrength = MutableStateFlow(0f)
+    val emfFieldStrength = _emfFieldStrength.asStateFlow()
+
+    private val _inertialSteps = MutableStateFlow(0)
+    val inertialSteps = _inertialSteps.asStateFlow()
     private val database = AppDatabase.getDatabase(application)
     private val locationDao = database.deviceLocationDao()
     private val aliasDao = database.deviceAliasDao()
@@ -336,6 +344,12 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
         rotationSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
+        magneticSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        stepSensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
     }
 
     override fun onCleared() {
@@ -345,6 +359,15 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+            val magnitude = kotlin.math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+            _emfFieldStrength.value = magnitude
+        } else if (event?.sensor?.type == Sensor.TYPE_STEP_DETECTOR) {
+            _inertialSteps.value += 1
+        }
         if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
             val rotationMatrix = FloatArray(9)
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)

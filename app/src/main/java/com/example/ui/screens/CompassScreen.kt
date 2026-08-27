@@ -36,6 +36,9 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
     val userPitch by viewModel.userPitch.collectAsState()
     val userRoll by viewModel.userRoll.collectAsState()
     val estimatedBearings by viewModel.estimatedBearings.collectAsState()
+    val emfStrength by viewModel.emfFieldStrength.collectAsState()
+    val inertialSteps by viewModel.inertialSteps.collectAsState()
+
     
     var showSettingsDialog by remember { mutableStateOf(false) }
 
@@ -47,7 +50,7 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
-                )
+            )
             }
         } else {
             val target = trackingDevice!!
@@ -80,6 +83,37 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
                 }
             }
             
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Inertial SLAM & Magnetic Sensor",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Pedometer Map", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$inertialSteps Steps", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("EMF Detector", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${String.format("%.1f", emfStrength)} µT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (emfStrength > 100f) Color.Red else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    if (emfStrength > 100f) {
+                        Text("⚠️ STRONG METALLIC/MAGNETIC SIGNATURE DETECTED", style = MaterialTheme.typography.labelSmall, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
             Spacer(modifier = Modifier.weight(1f))
             
             val proximityRatio = (1.0 - (target.distanceMeters / 30.0)).coerceIn(0.0, 1.0).toFloat()
@@ -180,11 +214,42 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
                 modifier = Modifier.padding(32.dp),
                 textAlign = TextAlign.Center
             )
-            
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Inertial SLAM & Magnetic Sensor",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Pedometer Map", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$inertialSteps Steps", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("EMF Detector", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${String.format("%.1f", emfStrength)} µT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (emfStrength > 100f) Color.Red else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    if (emfStrength > 100f) {
+                        Text("⚠️ STRONG METALLIC/MAGNETIC SIGNATURE DETECTED", style = MaterialTheme.typography.labelSmall, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
             Spacer(modifier = Modifier.weight(1f))
         }
     }
-    
+
     if (showSettingsDialog) {
         AlertSettingsDialog(viewModel = viewModel, onDismiss = { showSettingsDialog = false })
     }
