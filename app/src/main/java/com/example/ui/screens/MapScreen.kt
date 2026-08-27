@@ -50,6 +50,8 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController
     var boxHeight by remember { mutableStateOf(0f) }
     var zoomScale by remember { mutableStateOf(1f) }
     var selectedDeviceMac by remember { mutableStateOf<String?>(null) }
+    var heatMapVisible by remember { mutableStateOf(true) }
+    var showHeatMapInfoDialog by remember { mutableStateOf(false) }
 
     val selectedDevice = devices.find { it.macAddress == selectedDeviceMac }
 
@@ -74,6 +76,16 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController
             repeatMode = RepeatMode.Restart
         ),
         label = "rippleProgress"
+    )
+
+    val heatPulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heatPulseAlpha"
     )
 
     Box(
@@ -257,6 +269,38 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController
                         style = Stroke(width = 1.5f)
                     )
 
+                    // RF Signal Heat Map Thermal Bloom Layer
+                    if (heatMapVisible) {
+                        devices.forEach { device ->
+                            val distanceRatio = (device.distanceMeters / maxDisplayDistance).coerceIn(0.0, 1.0)
+                            val r = maxRadius * distanceRatio
+                            val visualAngle = (device.macAddress.hashCode() and 0x7FFFFFFF) % 360f
+                            val angleRad = Math.toRadians(visualAngle.toDouble()) - Math.PI / 2
+
+                            val x = center.x + (r * cos(angleRad)).toFloat()
+                            val y = center.y + (r * sin(angleRad)).toFloat()
+                            val nodeCenter = Offset(x, y)
+
+                            val (coreColor, haloColor, heatRadius) = when {
+                                device.rssi >= -55 -> Triple(Color(0xFFFF1744), Color(0xFFFF9100), 65f)
+                                device.rssi >= -70 -> Triple(Color(0xFFFFAB00), Color(0xFFFFD600), 45f)
+                                device.rssi >= -85 -> Triple(Color(0xFF00E5FF), Color(0xFF00B0FF), 32f)
+                                else -> Triple(Color(0xFF304FFE), Color(0xFF651FFF), 22f)
+                            }
+
+                            drawCircle(
+                                color = haloColor.copy(alpha = heatPulseAlpha * 0.35f),
+                                radius = heatRadius * 1.6f,
+                                center = nodeCenter
+                            )
+                            drawCircle(
+                                color = coreColor.copy(alpha = heatPulseAlpha * 0.6f),
+                                radius = heatRadius,
+                                center = nodeCenter
+                            )
+                        }
+                    }
+
                     // Target Blip Points
                     devices.forEach { device ->
                         val distanceRatio = (device.distanceMeters / maxDisplayDistance).coerceIn(0.0, 1.0)
@@ -364,6 +408,32 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController
                         }
                     }
                 }
+            }
+        }
+
+        // FLOATING MAP ACTION CONTROLS
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 70.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SmallFloatingActionButton(
+                onClick = { heatMapVisible = !heatMapVisible },
+                containerColor = OniSurfaceVariant,
+                contentColor = if (heatMapVisible) Color(0xFFFF5252) else Color.Gray,
+                modifier = Modifier.border(1.dp, if (heatMapVisible) Color(0xFFFF5252) else Color.Gray, CircleShape)
+            ) {
+                Icon(Icons.Default.Whatshot, contentDescription = "Toggle RF Heat Map", modifier = Modifier.size(18.dp))
+            }
+
+            SmallFloatingActionButton(
+                onClick = { showHeatMapInfoDialog = true },
+                containerColor = OniSurfaceVariant,
+                contentColor = OniAmber,
+                modifier = Modifier.border(1.dp, OniAmber, CircleShape)
+            ) {
+                Icon(Icons.Default.Info, contentDescription = "What is Heat Map?", modifier = Modifier.size(18.dp))
             }
         }
 
@@ -489,6 +559,45 @@ fun MapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController
                     }
                 }
             }
+        }
+
+        if (showHeatMapInfoDialog) {
+            AlertDialog(
+                onDismissRequest = { showHeatMapInfoDialog = false },
+                confirmButton = {
+                    TextButton(onClick = { showHeatMapInfoDialog = false }) {
+                        Text("UNDERSTOOD", color = OniNeonBlue, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Whatshot, contentDescription = null, tint = Color(0xFFFF5252))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("RF HEAT MAP EXPLANATION", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "The Tactical Radar overlay uses an electromagnetic RF Signal Heat Map to depict the physical density of radio waves in real-time.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "• Crimson/Red (Hot): Very strong signal (RSSI > -55 dBm), transmitter is within 0-3 meters.\n" +
+                                   "• Amber/Yellow: Moderate distance (3-10 meters).\n" +
+                                   "• Cyan/Blue: Perimeter range (10-25 meters).\n\n" +
+                                   "Toggle the flame icon anytime to enable or disable the thermal bloom layer.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.LightGray,
+                            fontSize = 11.sp
+                        )
+                    }
+                },
+                containerColor = OniDarkSurface,
+                shape = RoundedCornerShape(12.dp)
+            )
         }
     }
 }

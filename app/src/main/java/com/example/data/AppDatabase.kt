@@ -5,10 +5,21 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [DeviceLocationEntity::class, DeviceAliasEntity::class], version = 4, exportSchema = false)
+@Database(
+    entities = [
+        DeviceLocationEntity::class,
+        DeviceAliasEntity::class,
+        UserSettingsEntity::class,
+        CyberLogEntity::class
+    ],
+    version = 5,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun deviceLocationDao(): DeviceLocationDao
     abstract fun deviceAliasDao(): DeviceAliasDao
+    abstract fun userSettingsDao(): UserSettingsDao
+    abstract fun cyberLogDao(): CyberLogDao
 
     companion object {
         @Volatile

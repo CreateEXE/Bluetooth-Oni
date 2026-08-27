@@ -33,6 +33,8 @@ import com.example.model.GeneralSettings
 import com.example.model.TrackedDevice
 import com.example.model.PortProbeResult
 import com.example.model.BeaconDecodedData
+import com.example.model.LocationIntegrityReport
+import com.example.util.LocationIntegrityAudit
 import com.example.util.BleUtils
 import com.example.util.GeoUtils
 import com.example.util.AudioSonarSynth
@@ -129,6 +131,41 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val _currentLocation = MutableStateFlow<android.location.Location?>(null)
     val currentLocation = _currentLocation.asStateFlow()
 
+    private val _locationIntegrityReport = MutableStateFlow(LocationIntegrityAudit.audit(application, null))
+    val locationIntegrityReport = _locationIntegrityReport.asStateFlow()
+
+    fun refreshLocationIntegrity() {
+        _locationIntegrityReport.value = LocationIntegrityAudit.audit(getApplication(), _currentLocation.value)
+    }
+
+    fun setCustomCoordinates(lat: Double, lon: Double) {
+        val loc = android.location.Location("manual_recalibration").apply {
+            latitude = lat
+            longitude = lon
+            accuracy = 1.0f
+            time = System.currentTimeMillis()
+        }
+        _currentLocation.value = loc
+        _locationIntegrityReport.value = LocationIntegrityAudit.audit(getApplication(), loc)
+        bleGattController.log("GPS", "Manual GNSS Recalibration: Pos set to $lat, $lon", com.example.model.LogLevel.SUCCESS)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun forceRefreshGps() {
+        try {
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        _currentLocation.value = loc
+                        _locationIntegrityReport.value = LocationIntegrityAudit.audit(getApplication(), loc)
+                        bleGattController.log("GPS", "High-accuracy GNSS fix refreshed: ${loc.latitude}, ${loc.longitude} (±${loc.accuracy}m)", com.example.model.LogLevel.SUCCESS)
+                    }
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private val _emfFieldStrength = MutableStateFlow(0f)
     val emfFieldStrength = _emfFieldStrength.asStateFlow()
 
@@ -137,6 +174,25 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val database = AppDatabase.getDatabase(application)
     private val locationDao = database.deviceLocationDao()
     private val aliasDao = database.deviceAliasDao()
+    private val userSettingsDao = database.userSettingsDao()
+    private val cyberLogDao = database.cyberLogDao()
+
+    val isDaemonRunning = com.example.service.SonarDaemonService.isDaemonRunning
+    val daemonDeviceCount = com.example.service.SonarDaemonService.daemonDeviceCount
+    val daemonStatusText = com.example.service.SonarDaemonService.daemonStatusText
+
+    fun toggleDaemon(enable: Boolean) {
+        if (enable) {
+            com.example.service.SonarDaemonService.start(getApplication())
+        } else {
+            com.example.service.SonarDaemonService.stop(getApplication())
+        }
+        updateGeneralSettings(_generalSettings.value.copy(backgroundScanning = enable))
+    }
+
+    fun getHardwareAuditReport(): com.example.model.HardwareAuditReport {
+        return com.example.util.HardwareSensorAudit.generateAudit(getApplication())
+    }
 
     private val _aliases = MutableStateFlow<Map<String, String>>(emptyMap())
 
@@ -151,10 +207,40 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
 
     fun updateFilterSettings(settings: FilterSettings) {
         _filterSettings.value = settings
+        persistSettings()
     }
 
     fun updateGeneralSettings(settings: GeneralSettings) {
         _generalSettings.value = settings
+        persistSettings()
+    }
+
+    private fun persistSettings() {
+        viewModelScope.launch {
+            val gen = _generalSettings.value
+            val fil = _filterSettings.value
+            userSettingsDao.saveUserSettings(
+                com.example.data.UserSettingsEntity(
+                    id = 1,
+                    hapticFeedback = gen.hapticFeedback,
+                    flashlightAlert = gen.flashlightAlert,
+                    backgroundScanning = gen.backgroundScanning,
+                    sonarSoundEnabled = gen.sonarSoundEnabled,
+                    sonarEpicenterAutoFollow = gen.sonarEpicenterAutoFollow,
+                    sonarSweepAnimation = gen.sonarSweepAnimation,
+                    geigerAudioEnabled = gen.geigerAudioEnabled,
+                    showBluetooth = fil.showBluetooth,
+                    showWifi = fil.showWifi,
+                    showEmf = fil.showEmf,
+                    showNamedOnly = fil.showNamedOnly,
+                    showLockedWifi = fil.showLockedWifi,
+                    showOpenWifi = fil.showOpenWifi,
+                    showNewOnly = fil.showNewOnly,
+                    showTrackedOnly = fil.showTrackedOnly,
+                    minSignalStrength = fil.minSignalStrength
+                )
+            )
+        }
     }
 
     private val _userAzimuth = MutableStateFlow(0f)
@@ -310,6 +396,53 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
 
     init {
         viewModelScope.launch {
+            userSettingsDao.getUserSettings().collect { saved ->
+                if (saved != null) {
+                    _generalSettings.value = GeneralSettings(
+                        hapticFeedback = saved.hapticFeedback,
+                        flashlightAlert = saved.flashlightAlert,
+                        backgroundScanning = saved.backgroundScanning,
+                        sonarSoundEnabled = saved.sonarSoundEnabled,
+                        sonarEpicenterAutoFollow = saved.sonarEpicenterAutoFollow,
+                        sonarSweepAnimation = saved.sonarSweepAnimation,
+                        geigerAudioEnabled = saved.geigerAudioEnabled
+                    )
+                    _filterSettings.value = FilterSettings(
+                        showBluetooth = saved.showBluetooth,
+                        showWifi = saved.showWifi,
+                        showEmf = saved.showEmf,
+                        showNamedOnly = saved.showNamedOnly,
+                        showLockedWifi = saved.showLockedWifi,
+                        showOpenWifi = saved.showOpenWifi,
+                        showNewOnly = saved.showNewOnly,
+                        showTrackedOnly = saved.showTrackedOnly,
+                        minSignalStrength = saved.minSignalStrength
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            cyberLogDao.getRecentLogs().collect { dbLogs ->
+                if (dbLogs.isNotEmpty() && bleGattController.terminalLogs.value.isEmpty()) {
+                    val converted = dbLogs.map { entity ->
+                        com.example.model.CyberLogEntry(
+                            tag = entity.tag,
+                            message = entity.message,
+                            level = when (entity.level) {
+                                "SUCCESS" -> com.example.model.LogLevel.SUCCESS
+                                "WARNING" -> com.example.model.LogLevel.WARNING
+                                "CRITICAL", "ERROR" -> com.example.model.LogLevel.CRITICAL
+                                "INJECTION", "DATA" -> com.example.model.LogLevel.DATA
+                                else -> com.example.model.LogLevel.INFO
+                            },
+                            timestamp = entity.timestamp
+                        )
+                    }
+                    bleGattController.restoreLogs(converted)
+                }
+            }
+        }
+        viewModelScope.launch {
             aliasDao.getAllAliases().collect { list ->
                 _aliases.value = list.associate { it.macAddress to it.customName }
             }
@@ -354,6 +487,13 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     fun setAlias(macAddress: String, alias: String) {
         viewModelScope.launch {
             aliasDao.insertAlias(com.example.data.DeviceAliasEntity(macAddress, alias))
+        }
+    }
+
+    fun clearPersistentLogs() {
+        viewModelScope.launch {
+            cyberLogDao.clearLogs()
+            bleGattController.clearLogs()
         }
     }
     
@@ -551,6 +691,7 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
         override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
             result.lastLocation?.let {
                 _currentLocation.value = it
+                _locationIntegrityReport.value = LocationIntegrityAudit.audit(getApplication(), it)
             }
         }
     }

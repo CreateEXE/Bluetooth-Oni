@@ -44,5 +44,22 @@ class ExampleUnitTest {
         assertNotNull(decoded)
         assertTrue(decoded.rawHexPayload.isNotEmpty())
     }
+
+    @Test
+    fun testUserSettingsPersistenceDefaults() {
+        val entity = com.example.data.UserSettingsEntity(
+            id = 1,
+            hapticFeedback = true,
+            flashlightAlert = false,
+            backgroundScanning = true,
+            sonarSoundEnabled = true,
+            sonarEpicenterAutoFollow = true,
+            sonarSweepAnimation = true,
+            geigerAudioEnabled = false
+        )
+        assertEquals(1, entity.id)
+        assertTrue(entity.backgroundScanning)
+        assertTrue(entity.sonarEpicenterAutoFollow)
+    }
 }
 

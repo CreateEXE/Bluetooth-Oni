@@ -9,8 +9,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -18,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import com.example.model.DeviceCategory
+import com.example.model.LocationIntegrityLevel
 import com.example.model.SignalType
 import com.example.model.TrackedDevice
 import com.example.ui.theme.*
@@ -48,6 +52,7 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import kotlin.math.cos
 import kotlin.math.sin
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavController) {
     val context = LocalContext.current
@@ -55,12 +60,21 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
     val currentLocation by viewModel.currentLocation.collectAsState()
     val userAzimuth by viewModel.userAzimuth.collectAsState()
     val generalSettings by viewModel.generalSettings.collectAsState()
+    val integrityReport by viewModel.locationIntegrityReport.collectAsState()
     val scope = rememberCoroutineScope()
 
     var sonarLockEnabled by remember { mutableStateOf(generalSettings.sonarEpicenterAutoFollow) }
     var sonarSweepVisible by remember { mutableStateOf(generalSettings.sonarSweepAnimation) }
+    var heatMapVisible by remember { mutableStateOf(true) }
     var selectedDevice by remember { mutableStateOf<TrackedDevice?>(null) }
     var lastCenteredLocation by remember { mutableStateOf<GeoPoint?>(null) }
+
+    // Dialog states
+    var showIntegrityDialog by remember { mutableStateOf(false) }
+    var showHeatMapInfoDialog by remember { mutableStateOf(false) }
+    var showRecalibrateDialog by remember { mutableStateOf(false) }
+    var manualLatInput by remember { mutableStateOf("") }
+    var manualLonInput by remember { mutableStateOf("") }
 
     val mapView = remember {
         MapView(context).apply {
@@ -127,6 +141,17 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
         label = "wavePulse"
     )
 
+    // Heat map thermal pulse
+    val heatPulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heatPulse"
+    )
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // BASE MAP LAYER
         AndroidView(
@@ -176,13 +201,53 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
             }
         )
 
-        // REAL-TIME TACTICAL SONAR EPICENTER OVERLAY
-        if (sonarSweepVisible) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                val maxRadius = minOf(size.width, size.height) * 0.44f
+        // REAL-TIME TACTICAL SONAR & RF HEAT MAP CANVAS OVERLAY
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val maxRadius = minOf(size.width, size.height) * 0.44f
 
-                // Concentric Sonar Range Rings
+            // 1. RF SIGNAL HEAT MAP LAYER (Logarithmic Electromagnetic Density)
+            if (heatMapVisible && devices.isNotEmpty()) {
+                devices.forEach { device ->
+                    val distanceRatio = (device.distanceMeters / 30.0).coerceIn(0.05, 1.0)
+                    val r = maxRadius * distanceRatio.toFloat()
+                    val angle = (device.macAddress.hashCode() and 0x7FFFFFFF) % 360f
+                    val angleRad = Math.toRadians(angle.toDouble()) - Math.PI / 2
+                    val nodeX = center.x + (r * cos(angleRad)).toFloat()
+                    val nodeY = center.y + (r * sin(angleRad)).toFloat()
+                    val nodeCenter = Offset(nodeX, nodeY)
+
+                    // Thermal contour based on RSSI
+                    val (coreColor, haloColor, heatRadius) = when {
+                        device.rssi >= -55 -> Triple(Color(0xFFFF1744), Color(0xFFFF9100), 75f) // Hot (Immediate Red/Orange)
+                        device.rssi >= -70 -> Triple(Color(0xFFFFAB00), Color(0xFFFFD600), 55f) // Warm (Amber/Yellow)
+                        device.rssi >= -85 -> Triple(Color(0xFF00E5FF), Color(0xFF00B0FF), 40f) // Moderate (Cyan)
+                        else -> Triple(Color(0xFF304FFE), Color(0xFF651FFF), 28f)               // Cold (Deep Blue)
+                    }
+
+                    // Outer thermal diffusion halo
+                    drawCircle(
+                        color = haloColor.copy(alpha = heatPulseAlpha * 0.35f),
+                        radius = heatRadius * 1.5f,
+                        center = nodeCenter
+                    )
+                    // Mid thermal radiation ring
+                    drawCircle(
+                        color = coreColor.copy(alpha = heatPulseAlpha * 0.6f),
+                        radius = heatRadius,
+                        center = nodeCenter
+                    )
+                    // Inner hot core
+                    drawCircle(
+                        color = coreColor.copy(alpha = 0.85f),
+                        radius = heatRadius * 0.35f,
+                        center = nodeCenter
+                    )
+                }
+            }
+
+            // 2. SONAR EPICENTER RANGE RINGS & ROTATING SWEEP
+            if (sonarSweepVisible) {
                 for (i in 1..4) {
                     val r = maxRadius * (i / 4f)
                     drawCircle(
@@ -265,17 +330,18 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
             }
         }
 
-        // TOP TACTICAL HUD TELEMETRY BAR
+        // TOP TACTICAL HUD TELEMETRY & PRIVACY INTEGRITY BAR
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(8.dp)
                 .align(Alignment.TopCenter),
-            color = OniDarkSurface.copy(alpha = 0.92f),
+            color = OniDarkSurface.copy(alpha = 0.94f),
             shape = RoundedCornerShape(8.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, OniNeonBlue.copy(alpha = 0.5f))
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
+                // Header row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -313,8 +379,9 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
+                // Real-Time Coordinates & Heading
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -336,16 +403,93 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                         fontFamily = FontFamily.Monospace
                     )
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // LOCATION & PRIVACY INTEGRITY STATUS BADGE (Clickable Audit Launcher)
+                val badge = when (integrityReport.integrityLevel) {
+                    LocationIntegrityLevel.AUTHENTIC_GNSS -> GeoIntegrityBadge(
+                        OniNeonGreen.copy(alpha = 0.15f),
+                        OniNeonGreen,
+                        "GNSS: HARDWARE FIX (±${String.format("%.1f", integrityReport.accuracyMeters)}m)",
+                        Icons.Default.VerifiedUser
+                    )
+                    LocationIntegrityLevel.SUSPICIOUS_MOCK -> GeoIntegrityBadge(
+                        OniDarkRed.copy(alpha = 0.25f),
+                        OniDarkRed,
+                        "ALERT: MOCK GPS DETECTED (SPOOFER ACTIVE)",
+                        Icons.Default.Warning
+                    )
+                    LocationIntegrityLevel.VPN_CLOAKED -> GeoIntegrityBadge(
+                        OniAmber.copy(alpha = 0.2f),
+                        OniAmber,
+                        "VPN ACTIVE: ${integrityReport.vpnInterfaceName ?: "TUNNEL"} (GEOIP CLOAKED)",
+                        Icons.Default.VpnKey
+                    )
+                    LocationIntegrityLevel.EMULATOR_VIRTUAL -> GeoIntegrityBadge(
+                        OniNeonBlue.copy(alpha = 0.2f),
+                        OniNeonBlue,
+                        "RUNTIME: VIRTUAL EMULATOR (SYNTHETIC FIX)",
+                        Icons.Default.Sensors
+                    )
+                    LocationIntegrityLevel.COARSE_CELLULAR -> GeoIntegrityBadge(
+                        OniAmber.copy(alpha = 0.2f),
+                        OniAmber,
+                        "COARSE FIX (±${String.format("%.0f", integrityReport.accuracyMeters)}m CELL/WIFI)",
+                        Icons.Default.CellTower
+                    )
+                    LocationIntegrityLevel.NO_FIX -> GeoIntegrityBadge(
+                        Color.DarkGray.copy(alpha = 0.3f),
+                        Color.Gray,
+                        "NO GNSS FIX (ACQUIRING SATELLITES...)",
+                        Icons.Default.GpsNotFixed
+                    )
+                }
+
+                Surface(
+                    color = badge.bg,
+                    shape = RoundedCornerShape(4.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, badge.border),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showIntegrityDialog = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(badge.icon, contentDescription = null, tint = badge.border, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = badge.text,
+                                color = badge.border,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Text(
+                            text = "[AUDIT >>]",
+                            color = OniNeonBlueVariant,
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
 
-        // FLOATING ACTION CONTROLS
+        // FLOATING ACTION CONTROLS (Map Controls & Heat Map Toggle)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Recenter
             FloatingActionButton(
                 onClick = {
                     sonarLockEnabled = true
@@ -362,6 +506,7 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                 Icon(Icons.Default.MyLocation, contentDescription = "Center on Epicenter")
             }
 
+            // Toggle Sonar Sweep
             FloatingActionButton(
                 onClick = {
                     sonarSweepVisible = !sonarSweepVisible
@@ -377,6 +522,33 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                 )
             }
 
+            // Toggle RF Heat Map
+            FloatingActionButton(
+                onClick = {
+                    heatMapVisible = !heatMapVisible
+                },
+                containerColor = OniSurfaceVariant,
+                contentColor = if (heatMapVisible) Color(0xFFFF5252) else Color.Gray,
+                shape = CircleShape,
+                modifier = Modifier.border(1.dp, if (heatMapVisible) Color(0xFFFF5252) else Color.Gray, CircleShape)
+            ) {
+                Icon(Icons.Default.Whatshot, contentDescription = "Toggle RF Heat Map")
+            }
+
+            // RF Heat Map Help & Explanation
+            FloatingActionButton(
+                onClick = {
+                    showHeatMapInfoDialog = true
+                },
+                containerColor = OniSurfaceVariant,
+                contentColor = OniAmber,
+                shape = CircleShape,
+                modifier = Modifier.border(1.dp, OniAmber, CircleShape)
+            ) {
+                Icon(Icons.Default.Info, contentDescription = "What is Heat Map?")
+            }
+
+            // Offline Cache
             FloatingActionButton(
                 onClick = {
                     scope.launch {
@@ -391,9 +563,9 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                     }
                 },
                 containerColor = OniSurfaceVariant,
-                contentColor = OniAmber,
+                contentColor = OniNeonBlueVariant,
                 shape = CircleShape,
-                modifier = Modifier.border(1.dp, OniAmber, CircleShape)
+                modifier = Modifier.border(1.dp, OniNeonBlueVariant, CircleShape)
             ) {
                 Icon(Icons.Default.Download, contentDescription = "Cache Region Offline")
             }
@@ -478,7 +650,7 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
                             ) {
                                 Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("HACK / CYBER DECK", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                Text("CYBER DECK", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                             }
 
                             Button(
@@ -500,4 +672,278 @@ fun GeoMapScreen(viewModel: BluetoothTrackerViewModel, navController: NavControl
             }
         }
     }
+
+    // LOCATION & PRIVACY INTEGRITY AUDIT DIALOG
+    if (showIntegrityDialog) {
+        AlertDialog(
+            onDismissRequest = { showIntegrityDialog = false },
+            confirmButton = {
+                TextButton(onClick = { showIntegrityDialog = false }) {
+                    Text("CLOSE", color = OniNeonBlue, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = OniNeonBlue)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("LOCATION INTEGRITY & CLOAKING AUDIT", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = integrityReport.diagnosticSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = OniDarkBorder)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("ANTI-SPOOFING & NETWORK TELEMETRY", style = MaterialTheme.typography.labelMedium, color = OniNeonBlueVariant, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    IntegrityField("VPN Tunnel Detection", if (integrityReport.isVpnActive) "ACTIVE (${integrityReport.vpnInterfaceName ?: "tun0"})" else "NO VPN DETECTED", if (integrityReport.isVpnActive) OniAmber else OniNeonGreen)
+                    IntegrityField("Mock Location (Spoofer)", if (integrityReport.isMockLocation) "MOCK DETECTED!" else "AUTHENTIC HARDWARE", if (integrityReport.isMockLocation) OniDarkRed else OniNeonGreen)
+                    IntegrityField("HTTP/SOCKS Proxy", if (integrityReport.isProxyActive) integrityReport.proxyDetails ?: "CONFIGURED" else "DIRECT CONNECTION", if (integrityReport.isProxyActive) OniAmber else OniNeonGreen)
+                    IntegrityField("GPS Provider", integrityReport.locationProvider.uppercase(), Color.White)
+                    IntegrityField("Fix Precision Accuracy", "±${String.format("%.1f", integrityReport.accuracyMeters)} meters", if (integrityReport.accuracyMeters < 15f) OniNeonGreen else OniAmber)
+                    IntegrityField("Fix Age / Freshness", "${integrityReport.locationAgeSeconds}s ago", if (integrityReport.locationAgeSeconds < 10L) OniNeonGreen else OniAmber)
+                    IntegrityField("Runtime Environment", if (integrityReport.isEmulator) "EMULATOR CONTAINER" else "PHYSICAL HARDWARE", if (integrityReport.isEmulator) OniNeonBlue else Color.White)
+
+                    if (integrityReport.anomalyWarnings.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("ACTIVE ANOMALY WARNINGS", style = MaterialTheme.typography.labelMedium, color = OniDarkRed, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        integrityReport.anomalyWarnings.forEach { warn ->
+                            Text("• $warn", style = MaterialTheme.typography.bodySmall, color = OniAmber, fontSize = 11.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Divider(color = OniDarkBorder)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("GPS ACTIONS & CALIBRATION", style = MaterialTheme.typography.labelMedium, color = OniNeonGreen, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.forceRefreshGps()
+                            viewModel.refreshLocationIntegrity()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(4.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OniNeonGreen)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("FORCE HIGH-PRECISION GNSS FIX", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showIntegrityDialog = false
+                            showRecalibrateDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(4.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OniNeonBlue)
+                    ) {
+                        Icon(Icons.Default.EditLocation, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("MANUAL GNSS RECALIBRATION", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            },
+            containerColor = OniDarkSurface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+
+    // MANUAL GPS RECALIBRATION DIALOG
+    if (showRecalibrateDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecalibrateDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val lat = manualLatInput.toDoubleOrNull()
+                        val lon = manualLonInput.toDoubleOrNull()
+                        if (lat != null && lon != null) {
+                            viewModel.setCustomCoordinates(lat, lon)
+                        }
+                        showRecalibrateDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OniNeonBlue),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text("APPLY RECALIBRATION", color = Color.Black, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRecalibrateDialog = false }) {
+                    Text("CANCEL", color = Color.Gray, fontFamily = FontFamily.Monospace)
+                }
+            },
+            title = {
+                Text("MANUAL GNSS RECALIBRATION", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace, color = OniNeonBlue)
+            },
+            text = {
+                Column {
+                    Text(
+                        "If you are running in an emulator or indoors without a satellite line-of-sight, you can set your coordinates manually:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = manualLatInput,
+                        onValueChange = { manualLatInput = it },
+                        label = { Text("Latitude (e.g. 37.7749)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = manualLonInput,
+                        onValueChange = { manualLonInput = it },
+                        label = { Text("Longitude (e.g. -122.4194)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("QUICK PRESETS", style = MaterialTheme.typography.labelSmall, color = OniNeonBlueVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        PresetButton("SF / Bay", "37.7749", "-122.4194") { manualLatInput = it.first; manualLonInput = it.second }
+                        PresetButton("New York", "40.7128", "-74.0060") { manualLatInput = it.first; manualLonInput = it.second }
+                        PresetButton("London", "51.5074", "-0.1278") { manualLatInput = it.first; manualLonInput = it.second }
+                    }
+                }
+            },
+            containerColor = OniDarkSurface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+
+    // RF HEAT MAP EXPLANATION DIALOG
+    if (showHeatMapInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showHeatMapInfoDialog = false },
+            confirmButton = {
+                TextButton(onClick = { showHeatMapInfoDialog = false }) {
+                    Text("UNDERSTOOD", color = OniNeonBlue, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Whatshot, contentDescription = null, tint = Color(0xFFFF5252))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("WHAT IS THE RF HEAT MAP?", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = "The RF Signal Heat Map is a tactical chromatic visualization of electromagnetic radio frequency density across your local physical environment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text("1. INVERSE-SQUARE LAW & LOG-DISTANCE ATTENUATION", style = MaterialTheme.typography.labelMedium, color = OniNeonBlueVariant, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = "Radio waves decay over distance according to the Free-Space Path Loss formula. When you approach a BLE beacon or Wi-Fi transmitter, the Received Signal Strength Indicator (RSSI in dBm) surges logarithmically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text("2. THERMAL GRADIENT COLOR CODING", style = MaterialTheme.typography.labelMedium, color = OniNeonGreen, fontFamily = FontFamily.Monospace)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    ThermalLegendRow("CRIMSON / ORANGE", "HOT ZONE (RSSI > -55 dBm): Immediate physical proximity (0 - 3m)", Color(0xFFFF1744))
+                    ThermalLegendRow("AMBER / YELLOW", "WARM ZONE (RSSI -55 to -70 dBm): Moderate proximity (3 - 10m)", Color(0xFFFFAB00))
+                    ThermalLegendRow("CYAN / BLUE", "COOL ZONE (RSSI -70 to -85 dBm): Outer perimeter (10 - 20m)", Color(0xFF00E5FF))
+                    ThermalLegendRow("DEEP INDIGO", "FRINGE ZONE (RSSI < -85 dBm): Edge of radio detection (> 20m)", Color(0xFF304FFE))
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("3. TRIANGULATION & PHYSICAL NODE RECON", style = MaterialTheme.typography.labelMedium, color = OniAmber, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = "As you move around your physical space with the Sonar Epicenter locked, overlapping thermal halos reveal the physical focal points where transmitters, rogue trackers, or Wi-Fi APs are hidden.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                    )
+                }
+            },
+            containerColor = OniDarkSurface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
 }
+
+@Composable
+private fun IntegrityField(label: String, value: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 11.sp)
+        Text(value, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun ThermalLegendRow(label: String, desc: String, dotColor: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .size(8.dp)
+                .background(dotColor, CircleShape)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = dotColor, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = Color.LightGray, fontSize = 10.5.sp)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.PresetButton(name: String, lat: String, lon: String, onSelect: (Pair<String, String>) -> Unit) {
+    OutlinedButton(
+        onClick = { onSelect(Pair(lat, lon)) },
+        modifier = Modifier.weight(1f),
+        shape = RoundedCornerShape(4.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        Text(name, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+    }
+}
+
+private data class GeoIntegrityBadge(
+    val bg: Color,
+    val border: Color,
+    val text: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)

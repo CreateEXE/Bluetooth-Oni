@@ -16,6 +16,7 @@ import com.example.model.LogLevel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 class BleGattController(private val context: Context) {
@@ -32,15 +33,43 @@ class BleGattController(private val context: Context) {
     private val _terminalLogs = MutableStateFlow<List<CyberLogEntry>>(emptyList())
     val terminalLogs = _terminalLogs.asStateFlow()
 
+    private val db = com.example.data.AppDatabase.getDatabase(context)
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+
     fun log(tag: String, message: String, level: LogLevel = LogLevel.INFO) {
         val entry = CyberLogEntry(tag = tag, message = message, level = level)
         _terminalLogs.update { current ->
             (listOf(entry) + current).take(200) // Keep latest 200 logs
         }
+        scope.launch {
+            try {
+                db.cyberLogDao().insertLog(
+                    com.example.data.CyberLogEntity(
+                        tag = tag,
+                        message = message,
+                        level = level.name,
+                        timestamp = entry.timestamp
+                    )
+                )
+            } catch (e: Exception) {
+                // Ignore background logging errors
+            }
+        }
+    }
+
+    fun restoreLogs(logs: List<CyberLogEntry>) {
+        _terminalLogs.value = logs
     }
 
     fun clearLogs() {
         _terminalLogs.value = emptyList()
+        scope.launch {
+            try {
+                db.cyberLogDao().clearLogs()
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")

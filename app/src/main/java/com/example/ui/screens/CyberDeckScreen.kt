@@ -30,10 +30,12 @@ import com.example.ui.theme.*
 import com.example.viewmodel.BluetoothTrackerViewModel
 
 enum class CyberModule(val label: String, val icon: ImageVector) {
-    GATT("GATT LINK", Icons.Default.Bolt),
-    NETWORK("NET PROBE", Icons.Default.Wifi),
-    DECOMPILER("PACKET HEX", Icons.Default.Code),
-    ACOUSTIC("SONAR/SIGNAL", Icons.Default.VolumeUp)
+    GATT("GATT", Icons.Default.Bolt),
+    NETWORK("NET", Icons.Default.Wifi),
+    DECOMPILER("HEX", Icons.Default.Code),
+    ACOUSTIC("AUDIO", Icons.Default.VolumeUp),
+    INTEGRITY("ANTI-SPOOF", Icons.Default.Shield),
+    HARDWARE("HW", Icons.Default.Memory)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -352,6 +354,27 @@ fun CyberDeckScreen(viewModel: BluetoothTrackerViewModel, navController: NavCont
                         onCyberTone = { viewModel.triggerCyberTone() },
                         onGeigerTick = { viewModel.triggerGeigerTick(1.0f) },
                         onFlashlightStrobe = { viewModel.triggerFlashlightStrobe() }
+                    )
+                }
+                CyberModule.INTEGRITY -> {
+                    val integrityReport by viewModel.locationIntegrityReport.collectAsState()
+                    LocationIntegrityModuleView(
+                        report = integrityReport,
+                        onRefresh = {
+                            viewModel.forceRefreshGps()
+                            viewModel.refreshLocationIntegrity()
+                        },
+                        onRecalibrate = { lat, lon ->
+                            viewModel.setCustomCoordinates(lat, lon)
+                        }
+                    )
+                }
+                CyberModule.HARDWARE -> {
+                    HardwareAuditModuleView(
+                        report = remember { viewModel.getHardwareAuditReport() },
+                        isDaemonRunning = viewModel.isDaemonRunning.collectAsState().value,
+                        daemonStatus = viewModel.daemonStatusText.collectAsState().value,
+                        onToggleDaemon = { viewModel.toggleDaemon(it) }
                     )
                 }
             }
@@ -957,3 +980,593 @@ fun AcousticInterferenceView(
         }
     }
 }
+
+@Composable
+fun HardwareAuditModuleView(
+    report: com.example.model.HardwareAuditReport,
+    isDaemonRunning: Boolean,
+    daemonStatus: String,
+    onToggleDaemon: (Boolean) -> Unit
+) {
+    var selectedSection by remember { mutableStateOf(0) } // 0: RF RADIOS, 1: PHYSICAL SENSORS
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // HOST SOC & HARDWARE SPECS
+        item {
+            Surface(
+                color = Color.Black,
+                shape = RoundedCornerShape(6.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, OniNeonBlue.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "HOST SILICON TELEMETRY",
+                            color = OniNeonBlue,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = report.androidVersion,
+                            color = Color.Gray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "DEVICE: ${report.deviceModel}",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "CHIPSET/SOC: ${report.socManufacturer.uppercase()} • ${report.totalPhysicalSensors} PHYSICAL SENSORS DETECTED",
+                        color = OniNeonGreen,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        // BACKGROUND DAEMON CONTROL CARD
+        item {
+            Surface(
+                color = if (isDaemonRunning) OniSurfaceVariant else Color.Black,
+                shape = RoundedCornerShape(6.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDaemonRunning) OniNeonGreen else OniDarkBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        if (isDaemonRunning) OniNeonGreen else Color.Gray,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isDaemonRunning) "SPECTRE DAEMON RUNNING" else "DAEMON OFFLINE",
+                                color = if (isDaemonRunning) OniNeonGreen else Color.Gray,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = daemonStatus,
+                            color = Color.LightGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = isDaemonRunning,
+                        onCheckedChange = onToggleDaemon
+                    )
+                }
+            }
+        }
+
+        // SECTION SWITCHER
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { selectedSection = 0 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedSection == 0) OniNeonBlue else OniSurfaceVariant
+                    ),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.weight(1f).height(36.dp)
+                ) {
+                    Text(
+                        text = "RF RADIOS & SPECTRUM (${report.radioSpecs.size})",
+                        color = if (selectedSection == 0) Color.Black else Color.White,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = { selectedSection = 1 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedSection == 1) OniNeonGreen else OniSurfaceVariant
+                    ),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.weight(1f).height(36.dp)
+                ) {
+                    Text(
+                        text = "HARDWARE SENSORS (${report.sensors.size})",
+                        color = if (selectedSection == 1) Color.Black else Color.White,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        if (selectedSection == 0) {
+            // RF RADIOS LIST
+            items(report.radioSpecs) { radio ->
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(4.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (radio.isSupported) OniDarkBorder else OniRed.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = radio.title,
+                                color = if (radio.isSupported) OniNeonBlue else Color.Gray,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            Surface(
+                                color = if (radio.isSupported) OniNeonGreen.copy(alpha = 0.2f) else OniRed.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(2.dp)
+                            ) {
+                                Text(
+                                    text = if (radio.isSupported) "SUPPORTED" else "UNAVAILABLE",
+                                    color = if (radio.isSupported) OniNeonGreen else OniRed,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "SPECTRUM / BAND: ${radio.frequencyBand}",
+                            color = OniAmber,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "STANDARD: ${radio.standard}",
+                            color = Color.LightGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = radio.details,
+                            color = Color.Gray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+        } else {
+            // PHYSICAL SENSORS LIST
+            items(report.sensors) { sensor ->
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(4.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, OniDarkBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = sensor.typeString,
+                                color = OniNeonGreen,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            if (sensor.isWakeUp) {
+                                Surface(
+                                    color = OniAmber.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(2.dp)
+                                ) {
+                                    Text(
+                                        text = "WAKE-UP",
+                                        color = OniAmber,
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "CHIP: ${sensor.name} (${sensor.vendor})",
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "POWER: ${sensor.powerMa} mA",
+                                color = Color.Gray,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = "RANGE: ${sensor.maxRange}",
+                                color = Color.Gray,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = "RES: ${sensor.resolution}",
+                                color = Color.Gray,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LocationIntegrityModuleView(
+    report: com.example.model.LocationIntegrityReport,
+    onRefresh: () -> Unit,
+    onRecalibrate: (Double, Double) -> Unit
+) {
+    var showRecalibrateDialog by remember { mutableStateOf(false) }
+    var latInput by remember { mutableStateOf("") }
+    var lonInput by remember { mutableStateOf("") }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            // INTEGRITY STATUS HERO CARD
+            val badgeStyle = when (report.integrityLevel) {
+                com.example.model.LocationIntegrityLevel.AUTHENTIC_GNSS -> com.example.model.IntegrityBadgeStyle(
+                    OniNeonGreen.copy(alpha = 0.12f),
+                    OniNeonGreen,
+                    "AUTHENTIC HARDWARE GNSS // VERIFIED",
+                    OniNeonGreen
+                )
+                com.example.model.LocationIntegrityLevel.SUSPICIOUS_MOCK -> com.example.model.IntegrityBadgeStyle(
+                    OniDarkRed.copy(alpha = 0.2f),
+                    OniDarkRed,
+                    "SECURITY WARNING: MOCK LOCATION ACTIVE",
+                    OniDarkRed
+                )
+                com.example.model.LocationIntegrityLevel.VPN_CLOAKED -> com.example.model.IntegrityBadgeStyle(
+                    OniAmber.copy(alpha = 0.15f),
+                    OniAmber,
+                    "NETWORK CLOAKED: ACTIVE VPN TUNNEL DETECTED",
+                    OniAmber
+                )
+                com.example.model.LocationIntegrityLevel.EMULATOR_VIRTUAL -> com.example.model.IntegrityBadgeStyle(
+                    OniNeonBlue.copy(alpha = 0.15f),
+                    OniNeonBlue,
+                    "VIRTUAL RUNTIME: EMULATOR CONTAINER DETECTED",
+                    OniNeonBlue
+                )
+                com.example.model.LocationIntegrityLevel.COARSE_CELLULAR -> com.example.model.IntegrityBadgeStyle(
+                    OniAmber.copy(alpha = 0.15f),
+                    OniAmber,
+                    "DEGRADED FIX: CELLULAR / WI-FI TRIANGULATION",
+                    OniAmber
+                )
+                com.example.model.LocationIntegrityLevel.NO_FIX -> com.example.model.IntegrityBadgeStyle(
+                    Color.DarkGray.copy(alpha = 0.2f),
+                    Color.Gray,
+                    "NO FIX ACQUIRED: SEARCHING CONSTELLATIONS...",
+                    Color.LightGray
+                )
+            }
+
+            Surface(
+                color = badgeStyle.backgroundColor,
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, badgeStyle.borderColor),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = badgeStyle.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            color = badgeStyle.tintColor
+                        )
+                        Icon(
+                            imageVector = if (report.isMockLocation || report.isVpnActive) Icons.Default.Shield else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = badgeStyle.tintColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = report.diagnosticSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        fontSize = 11.5.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            // ACTION BUTTONS ROW
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    shape = RoundedCornerShape(4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = OniNeonGreen),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, OniNeonGreen)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("RE-AUDIT GPS", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { showRecalibrateDialog = true },
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    shape = RoundedCornerShape(4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = OniNeonBlue)
+                ) {
+                    Icon(Icons.Default.EditLocation, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("RECALIBRATE", color = Color.Black, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            // ANTI-SPOOFING DIAGNOSTICS CARD
+            CyberSectionCard(title = "ANTI-SPOOFING & CLOAKING MATRIX", icon = Icons.Default.VpnKey) {
+                CyberMetricRow("VPN Tunnel Interface", if (report.isVpnActive) "ACTIVE (${report.vpnInterfaceName ?: "tun0"})" else "NO VPN DETECTED", if (report.isVpnActive) OniAmber else OniNeonGreen)
+                CyberMetricRow("Mock GPS Status", if (report.isMockLocation) "SPOOFER DETECTED!" else "AUTHENTIC OS GNSS", if (report.isMockLocation) OniDarkRed else OniNeonGreen)
+                CyberMetricRow("System HTTP/SOCKS Proxy", if (report.isProxyActive) report.proxyDetails ?: "ACTIVE" else "DIRECT (NO PROXY)", if (report.isProxyActive) OniAmber else OniNeonGreen)
+                CyberMetricRow("Runtime Container", if (report.isEmulator) "VIRTUAL EMULATOR" else "PHYSICAL SILICON", if (report.isEmulator) OniNeonBlue else Color.White)
+            }
+        }
+
+        item {
+            // POSITIONING TELEMETRY CARD
+            CyberSectionCard(title = "GNSS SATELLITE & FIX TELEMETRY", icon = Icons.Default.MyLocation) {
+                val latStr = String.format("%.6f", report.latitude)
+                val lonStr = String.format("%.6f", report.longitude)
+                CyberMetricRow("Coordinates (Lat / Lon)", "$latStr, $lonStr", OniNeonBlueVariant)
+                CyberMetricRow("Location Provider", report.locationProvider.uppercase(), Color.White)
+                CyberMetricRow("Horizontal Accuracy", "±${String.format("%.1f", report.accuracyMeters)} meters", if (report.accuracyMeters < 15f) OniNeonGreen else OniAmber)
+                CyberMetricRow("Ground Speed", "${String.format("%.1f", report.speedMps)} m/s (${String.format("%.0f", report.speedMps * 3.6f)} km/h)", Color.White)
+                CyberMetricRow("Fix Freshness / Age", "${report.locationAgeSeconds} seconds ago", if (report.locationAgeSeconds < 15L) OniNeonGreen else OniAmber)
+            }
+        }
+
+        if (report.anomalyWarnings.isNotEmpty()) {
+            item {
+                CyberSectionCard(title = "INTEGRITY ANOMALIES DETECTED", icon = Icons.Default.Warning, borderColor = OniDarkRed) {
+                    report.anomalyWarnings.forEach { warning ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(">>", color = OniDarkRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(warning, style = MaterialTheme.typography.bodySmall, color = OniAmber, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            // EDUCATIONAL NOTICE
+            Surface(
+                color = OniDarkSurface,
+                shape = RoundedCornerShape(6.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, OniDarkBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        text = "LOCATION INTEGRITY ARCHITECTURE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OniNeonBlueVariant,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "The anti-spoofing engine queries Android low-level NetworkCapabilities, Linux tun/ppp virtual interfaces, and the Android 12+ isMock hardware flag to detect GPS spoofers, Mock Providers, VPN routing, and emulator containers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        fontSize = 10.5.sp
+                    )
+                }
+            }
+        }
+    }
+
+    if (showRecalibrateDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecalibrateDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val lat = latInput.toDoubleOrNull()
+                        val lon = lonInput.toDoubleOrNull()
+                        if (lat != null && lon != null) {
+                            onRecalibrate(lat, lon)
+                        }
+                        showRecalibrateDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OniNeonBlue),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text("SET FIX", color = Color.Black, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRecalibrateDialog = false }) {
+                    Text("CANCEL", color = Color.Gray, fontFamily = FontFamily.Monospace)
+                }
+            },
+            title = {
+                Text("MANUAL GNSS COORDINATE INJECTION", style = MaterialTheme.typography.titleSmall, fontFamily = FontFamily.Monospace, color = OniNeonBlue)
+            },
+            text = {
+                Column {
+                    Text("Enter custom decimal coordinates to manually calibrate map position:", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = latInput,
+                        onValueChange = { latInput = it },
+                        label = { Text("Latitude (e.g. 37.7749)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = lonInput,
+                        onValueChange = { lonInput = it },
+                        label = { Text("Longitude (e.g. -122.4194)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            containerColor = OniDarkSurface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+}
+
+@Composable
+private fun CyberSectionCard(
+    title: String,
+    icon: ImageVector,
+    borderColor: Color = OniDarkBorder,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        color = Color.Black,
+        shape = RoundedCornerShape(6.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, tint = OniNeonBlue, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = OniNeonBlueVariant,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun CyberMetricRow(label: String, value: String, valueColor: Color = Color.White) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = valueColor,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp
+        )
+    }
+}
+

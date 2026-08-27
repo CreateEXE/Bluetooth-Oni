@@ -121,7 +121,46 @@ fun SettingsScreen(viewModel: BluetoothTrackerViewModel, navController: NavContr
             )
 
             Spacer(modifier = Modifier.height(24.dp))
-            SectionHeader(title = "Native Integration", icon = Icons.Default.Settings)
+            SectionHeader(title = "Spectre Background Daemon", icon = Icons.Default.Sensors)
+            
+            val isDaemonRunning by viewModel.isDaemonRunning.collectAsState()
+            val daemonStatus by viewModel.daemonStatusText.collectAsState()
+
+            Surface(
+                color = if (isDaemonRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDaemonRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (isDaemonRunning) "Foreground Sonar Daemon (ACTIVE)" else "Foreground Sonar Daemon (INACTIVE)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                color = if (isDaemonRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = daemonStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isDaemonRunning,
+                            onCheckedChange = { viewModel.toggleDaemon(it) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionHeader(title = "Native Integration & Alerts", icon = Icons.Default.Settings)
             
             SettingsSwitch(
                 label = "Haptic Feedback (Vibration)",
@@ -133,11 +172,26 @@ fun SettingsScreen(viewModel: BluetoothTrackerViewModel, navController: NavContr
                 checked = generalSettings.flashlightAlert,
                 onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(flashlightAlert = it)) }
             )
-            SettingsSwitch(
-                label = "Background Service Scanning",
-                checked = generalSettings.backgroundScanning,
-                onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(backgroundScanning = it)) }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionHeader(title = "Persistent Storage & Memory", icon = Icons.Default.Storage)
+
+            Text(
+                "Filter configurations, Sonar audio preferences, node aliases, tracking breadcrumbs, and terminal session logs are automatically stored in the local SQLite Room database.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { viewModel.clearPersistentLogs() },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+            ) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("CLEAR PERSISTENT TERMINAL & CYBER LOGS")
+            }
             
             Spacer(modifier = Modifier.height(32.dp))
             Text(
