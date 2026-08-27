@@ -7,6 +7,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.FilterList
+import com.example.model.DeviceFilter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -30,12 +34,12 @@ import android.os.Vibrator
 import android.content.Context
 
 enum class Screen(val route: String, val title: String, val icon: ImageVector) {
-    List("list", "Devices", Icons.Default.List),
+    List("list", "Devices", Icons.AutoMirrored.Filled.List),
     Map("map", "Radar Map", Icons.Default.Map),
     Compass("compass", "Compass", Icons.Default.Explore)
 }
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
     val navController = rememberNavController()
@@ -129,6 +133,51 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
     }
 
     Scaffold(
+        topBar = {
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentRoute = navBackStackEntry?.destination?.route
+            if (currentRoute != "splash") {
+                TopAppBar(
+                    title = { Text("Tracker") },
+                    actions = {
+                        var expanded by remember { mutableStateOf(false) }
+                        val currentFilter by viewModel.deviceFilter.collectAsState()
+                        IconButton(onClick = { expanded = true }) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                        }
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Show All Devices") },
+                                onClick = {
+                                    viewModel.setDeviceFilter(DeviceFilter.ALL)
+                                    expanded = false
+                                },
+                                trailingIcon = { if (currentFilter == DeviceFilter.ALL) Icon(Icons.Default.Check, "") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Named Only") },
+                                onClick = {
+                                    viewModel.setDeviceFilter(DeviceFilter.NAMED_ONLY)
+                                    expanded = false
+                                },
+                                trailingIcon = { if (currentFilter == DeviceFilter.NAMED_ONLY) Icon(Icons.Default.Check, "") }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Unnamed / Hidden Only") },
+                                onClick = {
+                                    viewModel.setDeviceFilter(DeviceFilter.UNNAMED_ONLY)
+                                    expanded = false
+                                },
+                                trailingIcon = { if (currentFilter == DeviceFilter.UNNAMED_ONLY) Icon(Icons.Default.Check, "") }
+                            )
+                        }
+                    }
+                )
+            }
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             val navBackStackEntry by navController.currentBackStackEntryAsState()

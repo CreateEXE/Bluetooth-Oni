@@ -42,24 +42,12 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
     Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (trackingDevice == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = "No device",
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        "No device selected to track.",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        "Go to the list and tap a device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    "No device selected for tracking.\nGo to the list to select a device.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
             }
         } else {
             val target = trackingDevice!!
@@ -94,15 +82,15 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
             
             Spacer(modifier = Modifier.weight(1f))
             
-            // Dynamic 3D Gyroscope Compass
             val proximityRatio = (1.0 - (target.distanceMeters / 30.0)).coerceIn(0.0, 1.0).toFloat()
             val primaryColor = MaterialTheme.colorScheme.primary
             val secondaryColor = MaterialTheme.colorScheme.secondary
             
-            // Smooth the orientation changes slightly for better visual effect
             val smoothPitch by animateFloatAsState(targetValue = userPitch, animationSpec = tween(100), label = "pitch")
             val smoothRoll by animateFloatAsState(targetValue = userRoll, animationSpec = tween(100), label = "roll")
             val smoothAzimuth by animateFloatAsState(targetValue = userAzimuth, animationSpec = tween(100), label = "azimuth")
+            
+            val estimatedBearing = estimatedBearings[target.macAddress]
 
             Box(
                 modifier = Modifier
@@ -110,107 +98,68 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
                     .graphicsLayer {
                         rotationX = -smoothPitch // Pitch up/down
                         rotationY = smoothRoll // Roll left/right
-                        rotationZ = -smoothAzimuth // Yaw rotation (compass direction)
+                        // Point the whole canvas if we have a bearing, otherwise just North
+                        rotationZ = if (estimatedBearing != null) {
+                            estimatedBearing - smoothAzimuth
+                        } else {
+                            -smoothAzimuth
+                        }
                         cameraDistance = 12f * density
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // Compass Base / 3D structural rings
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val center = Offset(size.width / 2, size.height / 2)
                     
-                    // Outer structural ring
-                    drawCircle(
-                        color = Color.DarkGray.copy(alpha = 0.8f),
-                        radius = size.width / 2,
-                        center = center,
-                        style = Stroke(width = 8f)
-                    )
-                    
-                    // Inner structural ring
-                    drawCircle(
-                        color = Color.Gray.copy(alpha = 0.4f),
-                        radius = (size.width / 2) * 0.85f,
-                        center = center,
-                        style = Stroke(width = 4f)
-                    )
-                    
-                    // Crosshairs
-                    drawLine(Color.Gray.copy(alpha = 0.3f), Offset(center.x, 0f), Offset(center.x, size.height), strokeWidth = 2f)
-                    drawLine(Color.Gray.copy(alpha = 0.3f), Offset(0f, center.y), Offset(size.width, center.y), strokeWidth = 2f)
-                    
-                    // Signal strength indicator (pulsing center sphere/disc)
-                    val maxRadius = (size.width / 2) * 0.7f
-                    val currentRadius = maxRadius * proximityRatio
-                    
-                    drawCircle(
-                        color = primaryColor.copy(alpha = 0.6f),
-                        radius = currentRadius,
-                        center = center
-                    )
-                    
-                    // Core point
-                    drawCircle(
-                        color = secondaryColor,
-                        radius = 16f,
-                        center = center
-                    )
-                    
-                    // Draw Target Indicator if estimated
-                    val estimatedBearing = estimatedBearings[target.macAddress]
                     if (estimatedBearing != null) {
-                        rotate(degrees = estimatedBearing, pivot = center) {
-                            val targetPath = Path().apply {
-                                moveTo(center.x, center.y - (size.width / 2) * 1.1f)
-                                lineTo(center.x + 15f, center.y - (size.width / 2) * 0.9f)
-                                lineTo(center.x - 15f, center.y - (size.width / 2) * 0.9f)
-                                close()
-                            }
-                            drawPath(
-                                path = targetPath,
-                                color = Color.Green.copy(alpha = 0.9f)
-                            )
+                        // Drawing a large stylized arrow pointing Up (which gets rotated by the Box to target)
+                        val arrowPath = Path().apply {
+                            moveTo(center.x, center.y - 120f) // Tip
+                            lineTo(center.x + 70f, center.y + 90f) // Bottom Right
+                            lineTo(center.x, center.y + 50f) // Inner Bottom
+                            lineTo(center.x - 70f, center.y + 90f) // Bottom Left
+                            close()
                         }
-                    }
-                }
-                
-                // Floating indicators in 3D space
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            // Float above the base visually by scaling or just letting it render on top
-                            scaleX = 1.1f
-                            scaleY = 1.1f
-                        }
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val center = Offset(size.width / 2, size.height / 2)
                         
-                        // Compass North pointer
+                        // Drop shadow / glow
+                        drawPath(
+                            path = arrowPath,
+                            color = primaryColor.copy(alpha = 0.4f),
+                            style = Stroke(width = 20f)
+                        )
+                        
+                        drawPath(
+                            path = arrowPath,
+                            color = primaryColor
+                        )
+                    } else {
+                        // Indeterminate/Scanning stylized compass
+                        val maxRadius = (size.width / 2) * 0.7f
+                        val currentRadius = maxRadius * proximityRatio
+                        
+                        drawCircle(
+                            color = primaryColor.copy(alpha = 0.5f),
+                            radius = currentRadius,
+                            center = center
+                        )
+                        
+                        drawCircle(
+                            color = primaryColor,
+                            radius = currentRadius,
+                            center = center,
+                            style = Stroke(width = 4f)
+                        )
+                        
                         val path = Path().apply {
-                            moveTo(center.x, center.y - (size.width / 2) * 0.9f)
-                            lineTo(center.x + 20f, center.y)
-                            lineTo(center.x - 20f, center.y)
+                            moveTo(center.x, center.y - currentRadius - 30f)
+                            lineTo(center.x + 20f, center.y - currentRadius - 10f)
+                            lineTo(center.x - 20f, center.y - currentRadius - 10f)
                             close()
                         }
                         
                         drawPath(
                             path = path,
                             color = Color.Red.copy(alpha = 0.8f)
-                        )
-                        
-                        // South pointer
-                        val southPath = Path().apply {
-                            moveTo(center.x, center.y + (size.width / 2) * 0.9f)
-                            lineTo(center.x + 20f, center.y)
-                            lineTo(center.x - 20f, center.y)
-                            close()
-                        }
-                        
-                        drawPath(
-                            path = southPath,
-                            color = Color.White.copy(alpha = 0.5f)
                         )
                     }
                 }
@@ -220,9 +169,9 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
             
             val isEstimated = estimatedBearings.containsKey(target.macAddress)
             val instructionText = if (isEstimated) {
-                "Distance stabilized with EMA smoothing.\nGreen arrow shows estimated direction based on your movement history (Trilateration).\nKeep moving to improve accuracy."
+                "Target acquired. Arrow points in the estimated direction."
             } else {
-                "Distance stabilized with EMA smoothing.\nWalk around slowly with the device to calibrate the trilateration tracking algorithm and estimate direction."
+                "Distance stabilized.\nWalk around slowly to calibrate the tracking algorithm and reveal the direction arrow."
             }
             Text(
                 instructionText,
@@ -294,7 +243,7 @@ fun AlertSettingsDialog(viewModel: BluetoothTrackerViewModel, onDismiss: () -> U
                         Switch(checked = isHostageMode, onCheckedChange = { isHostageMode = it })
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Sound Alarm & Auto-Track (Killswitch)", 
+                            text = "Sound Alarm & Auto-Track", 
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (isHostageMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                         )

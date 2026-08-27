@@ -20,6 +20,7 @@ import com.example.model.AlertEvent
 import com.example.model.AlertSettings
 import com.example.model.AlertType
 import com.example.model.DeviceCategory
+import com.example.model.DeviceFilter
 import com.example.model.TrackedDevice
 import com.example.util.BleUtils
 import com.example.util.GeoUtils
@@ -43,6 +44,13 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
 
     private val _devices = MutableStateFlow<Map<String, TrackedDevice>>(emptyMap())
     val devices: StateFlow<List<TrackedDevice>> = MutableStateFlow(emptyList())
+
+    private val _deviceFilter = MutableStateFlow(DeviceFilter.ALL)
+    val deviceFilter = _deviceFilter.asStateFlow()
+
+    fun setDeviceFilter(filter: DeviceFilter) {
+        _deviceFilter.value = filter
+    }
 
     private val _userAzimuth = MutableStateFlow(0f)
     val userAzimuth = _userAzimuth.asStateFlow()
@@ -88,7 +96,7 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             val device = result.device
             val rawRssi = result.rssi
             val address = device.address
-            val name = device.name ?: "Unknown Device"
+            val name = if (!device.name.isNullOrBlank()) device.name!! else "Unknown (${address.takeLast(5)})"
             
             // Apply Exponential Moving Average (EMA) to smooth RSSI
             val currentSmoothed = smoothedRssiMap[address]
@@ -188,8 +196,16 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             }
         }
         viewModelScope.launch {
-            _devices.collect { map ->
-                (devices as MutableStateFlow).value = map.values.toList().sortedBy { it.distanceMeters }
+            combine(_devices, _deviceFilter) { map, filter ->
+                map.values.toList().filter { device ->
+                    when (filter) {
+                        DeviceFilter.ALL -> true
+                        DeviceFilter.NAMED_ONLY -> !device.name.startsWith("Unknown (")
+                        DeviceFilter.UNNAMED_ONLY -> device.name.startsWith("Unknown (")
+                    }
+                }.sortedBy { it.distanceMeters }
+            }.collect { filteredList ->
+                (devices as MutableStateFlow).value = filteredList
             }
         }
         startSensors()

@@ -11,5 +11,5 @@ data class TrackedDevice(
     val customAlias: String? = null
 ) {
     val displayName: String
-        get() = customAlias?.takeIf { it.isNotBlank() } ?: name.ifBlank { "Unknown Device" }
+        get() = customAlias?.takeIf { it.isNotBlank() } ?: name.ifBlank { "Unknown (${macAddress.takeLast(5)})" }
 }
