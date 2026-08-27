@@ -81,8 +81,7 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     val deviceHistory = _deviceHistory.asStateFlow()
 
     // EMA smoothing for RSSI precision
-    private val smoothedRssiMap = mutableMapOf<String, Double>()
-    private val smoothingFactor = 0.15
+    private val kalmanFilters = mutableMapOf<String, com.example.util.KalmanFilter>()
     
     // Direction estimation based on movement
     private val _estimatedBearings = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -96,16 +95,23 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             val device = result.device
             val rawRssi = result.rssi
             val address = device.address
-            val name = if (!device.name.isNullOrBlank()) device.name!! else "Unknown (${address.takeLast(5)})"
             
-            // Apply Exponential Moving Average (EMA) to smooth RSSI
-            val currentSmoothed = smoothedRssiMap[address]
-            val finalRssi = if (currentSmoothed != null) {
-                (smoothingFactor * rawRssi) + ((1.0 - smoothingFactor) * currentSmoothed)
+            
+            val rawName = result.scanRecord?.deviceName ?: device.name
+            val existingDevice = _devices.value[address]
+            val finalName = if (!rawName.isNullOrBlank()) {
+                rawName
+            } else if (existingDevice != null && !existingDevice.name.startsWith("Unknown (")) {
+                existingDevice.name
             } else {
-                rawRssi.toDouble()
+                "Unknown (${address.takeLast(5)})"
             }
-            smoothedRssiMap[address] = finalRssi
+
+            // Apply 1D Kalman Filter to smooth RSSI
+            val kf = kalmanFilters.getOrPut(address) { com.example.util.KalmanFilter(processNoise = 0.05, measurementNoise = 2.0) }
+            val finalRssi = kf.filter(rawRssi.toDouble())
+
+            // Calculate distance based on smoothed RSSI
             
             // Calculate distance based on smoothed RSSI
             val distance = GeoUtils.calculateDistance(finalRssi.toInt())
@@ -164,7 +170,7 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
 
             val trackable = TrackedDevice(
                 macAddress = address,
-                name = name,
+                name = finalName,
                 rssi = rssi,
                 distanceMeters = distance,
                 majorDeviceClass = majorClass,
