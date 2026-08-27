@@ -8,5 +8,7 @@ enum class DeviceCategory {
     HEALTH,
     PERIPHERAL,
     CAMERA,
+    WIFI_ROUTER,
+    ELECTRONIC,
     UNCATEGORIZED
 }

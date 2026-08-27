@@ -17,6 +17,8 @@ import com.example.model.DeviceCategory
 import com.example.model.TrackedDevice
 import com.example.viewmodel.BluetoothTrackerViewModel
 
+import com.example.model.SignalType
+
 @Composable
 fun DeviceListScreen(viewModel: BluetoothTrackerViewModel, onNavigateToCompass: () -> Unit) {
     val devices by viewModel.devices.collectAsState()
@@ -101,15 +103,20 @@ fun DeviceListScreen(viewModel: BluetoothTrackerViewModel, onNavigateToCompass: 
 }
 @Composable
 fun DeviceCard(device: TrackedDevice, onEditAlias: () -> Unit, onClick: () -> Unit) {
-    val icon = when (device.deviceCategory) {
-        DeviceCategory.PHONE -> Icons.Default.Smartphone
-        DeviceCategory.COMPUTER -> Icons.Default.Computer
-        DeviceCategory.AUDIO_VIDEO -> Icons.Default.Headset
-        DeviceCategory.WEARABLE -> Icons.Default.Watch
-        DeviceCategory.CAMERA -> Icons.Default.CameraAlt
-        DeviceCategory.HEALTH -> Icons.Default.Favorite
-        DeviceCategory.PERIPHERAL -> Icons.Default.Keyboard
-        else -> Icons.Default.Bluetooth
+    val icon = when (device.signalType) {
+        SignalType.WIFI -> Icons.Default.Wifi
+        SignalType.EMF -> Icons.Default.Bolt
+        SignalType.BLUETOOTH -> when (device.deviceCategory) {
+            DeviceCategory.PHONE -> Icons.Default.Smartphone
+            DeviceCategory.COMPUTER -> Icons.Default.Computer
+            DeviceCategory.AUDIO_VIDEO -> Icons.Default.Headset
+            DeviceCategory.WEARABLE -> Icons.Default.Watch
+            DeviceCategory.CAMERA -> Icons.Default.CameraAlt
+            DeviceCategory.HEALTH -> Icons.Default.Favorite
+            DeviceCategory.PERIPHERAL -> Icons.Default.Keyboard
+            DeviceCategory.WIFI_ROUTER -> Icons.Default.Wifi
+            else -> Icons.Default.Bluetooth
+        }
     }
 
     Card(

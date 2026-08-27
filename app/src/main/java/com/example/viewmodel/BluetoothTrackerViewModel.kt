@@ -8,6 +8,14 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.net.wifi.WifiManager
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.Priority
+import com.example.model.SignalType
+import android.content.IntentFilter
+import android.content.BroadcastReceiver
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -20,7 +28,8 @@ import com.example.model.AlertEvent
 import com.example.model.AlertSettings
 import com.example.model.AlertType
 import com.example.model.DeviceCategory
-import com.example.model.DeviceFilter
+import com.example.model.FilterSettings
+import com.example.model.GeneralSettings
 import com.example.model.TrackedDevice
 import com.example.util.BleUtils
 import com.example.util.GeoUtils
@@ -38,6 +47,11 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
     private val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+    private val wifiManager = application.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
+    
+    private val _currentLocation = MutableStateFlow<android.location.Location?>(null)
+    val currentLocation = _currentLocation.asStateFlow()
 
     private val _emfFieldStrength = MutableStateFlow(0f)
     val emfFieldStrength = _emfFieldStrength.asStateFlow()
@@ -53,11 +67,18 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val _devices = MutableStateFlow<Map<String, TrackedDevice>>(emptyMap())
     val devices: StateFlow<List<TrackedDevice>> = MutableStateFlow(emptyList())
 
-    private val _deviceFilter = MutableStateFlow(DeviceFilter.ALL)
-    val deviceFilter = _deviceFilter.asStateFlow()
+    private val _filterSettings = MutableStateFlow<FilterSettings>(FilterSettings())
+    val filterSettings = _filterSettings.asStateFlow()
 
-    fun setDeviceFilter(filter: DeviceFilter) {
-        _deviceFilter.value = filter
+    private val _generalSettings = MutableStateFlow<GeneralSettings>(GeneralSettings())
+    val generalSettings = _generalSettings.asStateFlow()
+
+    fun updateFilterSettings(settings: FilterSettings) {
+        _filterSettings.value = settings
+    }
+
+    fun updateGeneralSettings(settings: GeneralSettings) {
+        _generalSettings.value = settings
     }
 
     private val _userAzimuth = MutableStateFlow(0f)
@@ -187,7 +208,10 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
                 deviceCategory = deviceCategory,
                 vendor = vendorProfile.name,
                 txPower = vendorProfile.txPower,
-                customAlias = customAlias
+                customAlias = customAlias,
+                latitude = _currentLocation.value?.latitude,
+                longitude = _currentLocation.value?.longitude,
+                lastSeenTimestamp = System.currentTimeMillis()
             )
 
             _devices.update { current ->
@@ -213,13 +237,34 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             }
         }
         viewModelScope.launch {
-            combine(_devices, _deviceFilter) { map, filter ->
+            combine(_devices, _filterSettings) { map, filter ->
                 map.values.toList().filter { device ->
-                    when (filter) {
-                        DeviceFilter.ALL -> true
-                        DeviceFilter.NAMED_ONLY -> !device.name.startsWith("Unknown (")
-                        DeviceFilter.UNNAMED_ONLY -> device.name.startsWith("Unknown (")
+                    var match = true
+                    
+                    // Signal Type Filter
+                    if (!filter.showBluetooth && device.signalType == SignalType.BLUETOOTH) match = false
+                    if (!filter.showWifi && device.signalType == SignalType.WIFI) match = false
+                    if (!filter.showEmf && device.signalType == SignalType.EMF) match = false
+                    
+                    // Naming Filter
+                    if (filter.showNamedOnly && device.name.startsWith("Unknown (")) match = false
+                    
+                    // Wifi Security Filter
+                    if (device.signalType == SignalType.WIFI) {
+                        if (!filter.showLockedWifi && (device.isSecure == true)) match = false
+                        if (!filter.showOpenWifi && (device.isSecure == false)) match = false
                     }
+                    
+                    // Tracking Filter
+                    if (filter.showTrackedOnly && _trackingDevice.value?.macAddress != device.macAddress) match = false
+                    
+                    // Signal Strength Filter
+                    if (device.rssi < filter.minSignalStrength) match = false
+                    
+                    // "New Only" filter (simplification: seen in last 30 seconds)
+                    if (filter.showNewOnly && System.currentTimeMillis() - device.lastSeenTimestamp > 30000) match = false
+                    
+                    match
                 }.sortedBy { it.distanceMeters }
             }.collect { filteredList ->
                 (devices as MutableStateFlow).value = filteredList
@@ -258,6 +303,36 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     private val alertState = mutableMapOf<String, Boolean>() // true if already alerted
     
     private fun checkAlerts(device: TrackedDevice) {
+        // Haptic feedback for tracking
+        if (_trackingDevice.value?.macAddress == device.macAddress && _generalSettings.value.hapticFeedback) {
+            val vibrator = getApplication<Application>().getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (vibrator != null && vibrator.hasVibrator()) {
+                // Pulse faster as we get closer (hotter/colder)
+                val distance = device.distanceMeters
+                if (distance < 5.0) {
+                    val strength = (255 * (1.0 - (distance / 5.0).coerceIn(0.0, 1.0))).toInt()
+                    if (strength > 50) {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            vibrator.vibrate(android.os.VibrationEffect.createOneShot(50, strength))
+                        } else {
+                            vibrator.vibrate(50)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Flashlight alert for tracking
+        if (_trackingDevice.value?.macAddress == device.macAddress && _generalSettings.value.flashlightAlert) {
+            if (device.distanceMeters < 1.0) {
+                toggleFlashlight(true)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(100)
+                    toggleFlashlight(false)
+                }
+            }
+        }
+
         val settings = _deviceAlertSettings.value[device.macAddress] ?: return
         if (!settings.enabled) return
         
@@ -291,6 +366,18 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             )
         }
     }
+
+    private fun toggleFlashlight(enabled: Boolean) {
+        try {
+            val cameraManager = getApplication<Application>().getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull()
+            if (cameraId != null) {
+                cameraManager.setTorchMode(cameraId, enabled)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
     
     fun updateAlertSettings(macAddress: String, settings: AlertSettings) {
         _deviceAlertSettings.update { current ->
@@ -304,13 +391,89 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     @SuppressLint("MissingPermission")
     fun startScan() {
         if (_isScanning.value) return
+        
+        startLocationUpdates()
+
+        // Start Bluetooth Scan
         val scanner = bluetoothAdapter?.bluetoothLeScanner
         if (scanner != null) {
             val settings = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build()
             scanner.startScan(null, settings, scanCallback)
-            _isScanning.value = true
+        }
+
+        // Start Wi-Fi Scan
+        viewModelScope.launch {
+            while (_isScanning.value) {
+                try {
+                    wifiManager.startScan()
+                    val results = wifiManager.scanResults
+                    results.forEach { result ->
+                        processWifiResult(result)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                kotlinx.coroutines.delay(10000) // Scan Wi-Fi every 10 seconds (throttled by OS anyway)
+            }
+        }
+        
+        _isScanning.value = true
+    }
+
+    private fun processWifiResult(result: android.net.wifi.ScanResult) {
+        val address = result.BSSID
+        val rssi = result.level
+        val ssid = result.SSID
+        val capabilities = result.capabilities
+        val isSecure = capabilities.contains("WPA") || capabilities.contains("WEP") || capabilities.contains("EAP")
+        
+        val kf = kalmanFilters.getOrPut(address) { com.example.util.KalmanFilter(processNoise = 0.05, measurementNoise = 2.0) }
+        val finalRssi = kf.filter(rssi.toDouble())
+        
+        // Wi-Fi distance estimation is similar but different. Simplified here.
+        val distance = GeoUtils.calculateDistance(finalRssi.toInt(), -40) // Wi-Fi APs are usually stronger
+ 
+        val trackable = TrackedDevice(
+            macAddress = address,
+            name = if (ssid.isNullOrBlank()) "Hidden Network" else ssid,
+            rssi = finalRssi.toInt(),
+            distanceMeters = distance,
+            majorDeviceClass = 0, // Not applicable
+            isConnectable = true,
+            deviceCategory = DeviceCategory.WIFI_ROUTER,
+            vendor = "Network Infrastructure",
+            txPower = -40,
+            customAlias = _aliases.value[address],
+            signalType = SignalType.WIFI,
+            latitude = _currentLocation.value?.latitude,
+            longitude = _currentLocation.value?.longitude,
+            lastSeenTimestamp = System.currentTimeMillis(),
+            isSecure = isSecure
+        )
+
+        _devices.update { current ->
+            val newMap = current.toMutableMap()
+            newMap[address] = trackable
+            newMap
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLocationUpdates() {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
+            .setMinUpdateIntervalMillis(2000)
+            .build()
+
+        fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null)
+    }
+
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+            result.lastLocation?.let {
+                _currentLocation.value = it
+            }
         }
     }
 
@@ -318,6 +481,7 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
     fun stopScan() {
         if (!_isScanning.value) return
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+        fusedLocationClient.removeLocationUpdates(locationCallback)
         _isScanning.value = false
     }
 
@@ -368,6 +532,27 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             val z = event.values[2]
             val magnitude = kotlin.math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
             _emfFieldStrength.value = magnitude
+            
+            // If EMF is high (> 100 uT), treat it as an electronic device signature
+            if (magnitude > 100f) {
+                val emfDevice = TrackedDevice(
+                    macAddress = "EMF_SCAN",
+                    name = "Electronic Interference",
+                    rssi = -(magnitude / 2).toInt(),
+                    distanceMeters = (100.0 / magnitude).coerceAtMost(10.0),
+                    majorDeviceClass = 0,
+                    isConnectable = false,
+                    deviceCategory = DeviceCategory.ELECTRONIC,
+                    vendor = "Magnetic Signature",
+                    txPower = -50,
+                    signalType = SignalType.EMF
+                )
+                _devices.update { current ->
+                    val newMap = current.toMutableMap()
+                    newMap["EMF_SCAN"] = emfDevice
+                    newMap
+                }
+            }
         } else if (event?.sensor?.type == Sensor.TYPE_STEP_DETECTOR) {
             _inertialSteps.value += 1
         }

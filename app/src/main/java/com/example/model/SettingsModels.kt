@@ -1,0 +1,19 @@
+package com.example.model
+
+data class FilterSettings(
+    val showBluetooth: Boolean = true,
+    val showWifi: Boolean = true,
+    val showEmf: Boolean = true,
+    val showNamedOnly: Boolean = false,
+    val showLockedWifi: Boolean = true,
+    val showOpenWifi: Boolean = true,
+    val showNewOnly: Boolean = false,
+    val showTrackedOnly: Boolean = false,
+    val minSignalStrength: Int = -100
+)
+
+data class GeneralSettings(
+    val hapticFeedback: Boolean = true,
+    val flashlightAlert: Boolean = false,
+    val backgroundScanning: Boolean = false
+)
