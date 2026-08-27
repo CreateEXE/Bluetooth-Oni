@@ -4,9 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -95,6 +94,30 @@ fun SettingsScreen(viewModel: BluetoothTrackerViewModel, navController: NavContr
                 onValueChange = { viewModel.updateFilterSettings(filterSettings.copy(minSignalStrength = it.toInt())) },
                 valueRange = -100f..-30f,
                 steps = 70
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionHeader(title = "Sonar & Audio Feedback", icon = Icons.Default.VolumeUp)
+
+            SettingsSwitch(
+                label = "Sonar Audio Ping (Tactical 880Hz Chirp)",
+                checked = generalSettings.sonarSoundEnabled,
+                onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(sonarSoundEnabled = it)) }
+            )
+            SettingsSwitch(
+                label = "Map Sonar Epicenter Auto-Follow",
+                checked = generalSettings.sonarEpicenterAutoFollow,
+                onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(sonarEpicenterAutoFollow = it)) }
+            )
+            SettingsSwitch(
+                label = "Sonar 360° Sweep Beam Animation",
+                checked = generalSettings.sonarSweepAnimation,
+                onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(sonarSweepAnimation = it)) }
+            )
+            SettingsSwitch(
+                label = "Proximity Geiger Audio Ticks",
+                checked = generalSettings.geigerAudioEnabled,
+                onCheckedChange = { viewModel.updateGeneralSettings(generalSettings.copy(geigerAudioEnabled = it)) }
             )
 
             Spacer(modifier = Modifier.height(24.dp))

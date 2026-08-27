@@ -1,48 +1,47 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Settings
-import com.example.model.FilterSettings
-import com.example.model.GeneralSettings
-import com.example.model.TrackedDevice
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.ui.theme.*
 import com.example.viewmodel.BluetoothTrackerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import android.media.RingtoneManager
-import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.content.Context
-
-import androidx.compose.material.icons.filled.Language
 
 enum class Screen(val route: String, val title: String, val icon: ImageVector) {
-    List("list", "Devices", Icons.AutoMirrored.Filled.List),
+    List("list", "Nodes", Icons.AutoMirrored.Filled.List),
     Map("map", "Radar", Icons.Default.Map),
-    GeoMap("geomap", "World Map", Icons.Default.Language),
-    Compass("compass", "Compass", Icons.Default.Explore),
+    GeoMap("geomap", "Sonar Map", Icons.Default.Language),
+    CyberDeck("cyberdeck", "Cyber Deck", Icons.Default.Bolt),
+    Compass("compass", "Tracker", Icons.Default.Explore),
     Settings("settings", "Settings", Icons.Default.Settings)
 }
 
@@ -54,6 +53,7 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
     val context = LocalContext.current
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     val trackingDevice by viewModel.trackingDevice.collectAsState()
+    val generalSettings by viewModel.generalSettings.collectAsState()
 
     val permissions = mutableListOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -71,48 +71,53 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
             permissionState.launchMultiplePermissionRequest()
         }
     }
-    
-    // Proximity "Geiger Counter" haptic feedback
-    LaunchedEffect(trackingDevice?.macAddress) {
+
+    // Proximity "Geiger Counter" haptic & audio feedback loop
+    LaunchedEffect(trackingDevice?.macAddress, generalSettings.hapticFeedback, generalSettings.geigerAudioEnabled) {
         val mac = trackingDevice?.macAddress ?: return@LaunchedEffect
-        while(isActive) {
+        while (isActive) {
             val currentDevice = viewModel.devices.value.find { it.macAddress == mac }
             if (currentDevice != null) {
                 val dist = currentDevice.distanceMeters
-                
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(50)
+
+                if (generalSettings.hapticFeedback) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            vibrator.vibrate(40)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-                
-                // Calculate delay: closer = faster vibration
-                val delayMs = (dist * 100).toLong().coerceIn(100L, 2000L)
+
+                if (generalSettings.geigerAudioEnabled) {
+                    viewModel.triggerGeigerTick(1.0f)
+                }
+
+                // Closer = faster ticking rate
+                val delayMs = (dist * 90).toLong().coerceIn(90L, 1800L)
                 delay(delayMs)
             } else {
                 delay(1000)
             }
         }
     }
-    
+
+    // Breach Alerts
     LaunchedEffect(Unit) {
         viewModel.alertEvents.collect { event ->
             if (event.isSecurityBreach) {
-                // Play alarm sound
                 try {
                     val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                     val r = RingtoneManager.getRingtone(context, notification)
-                    r.play()
+                    r?.play()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                
-                // Vibrate with breach pattern
+
                 try {
                     val pattern = longArrayOf(0, 500, 200, 500, 200, 500)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -124,14 +129,13 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                
-                // Fast track device and switch to compass immediately
+
                 viewModel.fastTrackDeviceByMac(event.macAddress)
                 navController.navigate(Screen.Compass.route) {
                     launchSingleTop = true
                 }
             }
-            
+
             snackbarHostState.showSnackbar(
                 message = "${event.deviceName}: ${event.message}",
                 duration = SnackbarDuration.Short
@@ -145,14 +149,36 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
             val currentRoute = navBackStackEntry?.destination?.route
             if (currentRoute != "splash") {
                 TopAppBar(
-                    title = { Text("Tracker") },
-                    actions = {
-                        var expanded by remember { mutableStateOf(false) }
-                        val filterSettings by viewModel.filterSettings.collectAsState()
-                        IconButton(onClick = { navController.navigate(Screen.Settings.route) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(OniNeonGreen, RoundedCornerShape(2.dp))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "CTOS // SPECTRE SCANNER",
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 16.sp,
+                                color = OniNeonBlue
+                            )
                         }
-                    }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.triggerSonarAudioPing() }) {
+                            Icon(Icons.Default.VolumeUp, contentDescription = "Sonar Ping", tint = OniNeonGreen)
+                        }
+                        IconButton(onClick = { navController.navigate(Screen.Settings.route) }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = OniDarkSurface,
+                        titleContentColor = Color.White
+                    ),
+                    modifier = Modifier.border(1.dp, OniDarkBorder)
                 )
             }
         },
@@ -161,12 +187,33 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
             if (currentRoute != "splash") {
-                NavigationBar {
+                NavigationBar(
+                    containerColor = OniDarkSurface,
+                    modifier = Modifier.border(1.dp, OniDarkBorder)
+                ) {
                     Screen.values().forEach { screen ->
+                        val isSelected = currentRoute == screen.route
                         NavigationBarItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.title) },
-                            label = { Text(screen.title) },
-                            selected = currentRoute == screen.route,
+                            icon = {
+                                Icon(
+                                    screen.icon,
+                                    contentDescription = screen.title,
+                                    tint = if (isSelected) OniNeonBlue else Color.Gray
+                                )
+                            },
+                            label = {
+                                Text(
+                                    screen.title,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) OniNeonBlue else Color.Gray
+                                )
+                            },
+                            selected = isSelected,
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = OniSurfaceVariant
+                            ),
                             onClick = {
                                 navController.navigate(screen.route) {
                                     popUpTo(navController.graph.startDestinationId) {
@@ -189,7 +236,9 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
             NavHost(
                 navController = navController,
                 startDestination = "splash",
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .background(Color.Black)
             ) {
                 composable("splash") {
                     SplashScreen(onNavigateToMain = {
@@ -199,17 +248,24 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
                     })
                 }
                 composable(Screen.List.route) {
-                    DeviceListScreen(viewModel, onNavigateToCompass = {
-                        navController.navigate(Screen.Compass.route) {
-                            launchSingleTop = true
+                    DeviceListScreen(
+                        viewModel = viewModel,
+                        navController = navController,
+                        onNavigateToCompass = {
+                            navController.navigate(Screen.Compass.route) {
+                                launchSingleTop = true
+                            }
                         }
-                    })
+                    )
                 }
                 composable(Screen.Map.route) {
                     MapScreen(viewModel, navController)
                 }
                 composable(Screen.GeoMap.route) {
                     GeoMapScreen(viewModel, navController)
+                }
+                composable(Screen.CyberDeck.route) {
+                    CyberDeckScreen(viewModel, navController)
                 }
                 composable(Screen.Settings.route) {
                     SettingsScreen(viewModel, navController)
@@ -219,11 +275,50 @@ fun MainScreen(viewModel: BluetoothTrackerViewModel = viewModel()) {
                 }
             }
         } else {
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                Column(modifier = Modifier.align(androidx.compose.ui.Alignment.Center)) {
-                    Text("Permissions required to scan for Bluetooth devices.")
-                    Button(onClick = { permissionState.launchMultiplePermissionRequest() }) {
-                        Text("Grant Permissions")
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Security,
+                        contentDescription = null,
+                        tint = OniNeonBlue,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "RF SCANNING PERMISSION REQUIRED",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Location and Bluetooth hardware access needed for live Sonar Epicenter tracking and packet inspection.",
+                        color = Color.Gray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(
+                        onClick = { permissionState.launchMultiplePermissionRequest() },
+                        colors = ButtonDefaults.buttonColors(containerColor = OniNeonBlue),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            "AUTHORIZE SENSORS",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             }

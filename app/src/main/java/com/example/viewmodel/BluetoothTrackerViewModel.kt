@@ -31,16 +31,92 @@ import com.example.model.DeviceCategory
 import com.example.model.FilterSettings
 import com.example.model.GeneralSettings
 import com.example.model.TrackedDevice
+import com.example.model.PortProbeResult
+import com.example.model.BeaconDecodedData
 import com.example.util.BleUtils
 import com.example.util.GeoUtils
+import com.example.util.AudioSonarSynth
+import com.example.util.BeaconPacketDecompiler
+import com.example.util.BleGattController
+import com.example.util.NetworkPortScanner
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
 
-    private val bluetoothAdapter: BluetoothAdapter? by lazy {
+    val bluetoothAdapter: BluetoothAdapter? by lazy {
         val bluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothManager.adapter
+    }
+
+    val bleGattController = BleGattController(application)
+
+    private val _cyberTargetDevice = MutableStateFlow<TrackedDevice?>(null)
+    val cyberTargetDevice = _cyberTargetDevice.asStateFlow()
+
+    private val _portScanResults = MutableStateFlow<List<PortProbeResult>>(emptyList())
+    val portScanResults = _portScanResults.asStateFlow()
+
+    private val _isPortScanning = MutableStateFlow(false)
+    val isPortScanning = _isPortScanning.asStateFlow()
+
+    fun selectCyberTarget(device: TrackedDevice?) {
+        _cyberTargetDevice.value = device
+        if (device != null) {
+            bleGattController.log("CYBER", "Target node locked: ${device.displayName} [${device.macAddress}]", com.example.model.LogLevel.SUCCESS)
+        }
+    }
+
+    fun triggerSonarAudioPing() {
+        viewModelScope.launch {
+            AudioSonarSynth.playSonarPing()
+        }
+    }
+
+    fun triggerGeigerTick(intensity: Float = 1.0f) {
+        viewModelScope.launch {
+            AudioSonarSynth.playGeigerTick(intensity)
+        }
+    }
+
+    fun triggerCyberTone() {
+        viewModelScope.launch {
+            AudioSonarSynth.playCyberTone()
+        }
+    }
+
+    fun triggerFlashlightStrobe(pulseCount: Int = 3) {
+        viewModelScope.launch {
+            for (i in 0 until pulseCount) {
+                toggleFlashlight(true)
+                kotlinx.coroutines.delay(80)
+                toggleFlashlight(false)
+                kotlinx.coroutines.delay(80)
+            }
+        }
+    }
+
+    fun startPortScanOnTarget(targetIpOrHost: String) {
+        if (_isPortScanning.value) return
+        _isPortScanning.value = true
+        _portScanResults.value = emptyList()
+        bleGattController.log("PORT", "Launching high-speed TCP socket sweep on $targetIpOrHost...", com.example.model.LogLevel.INFO)
+
+        viewModelScope.launch {
+            val results = NetworkPortScanner.scanHost(targetIpOrHost) { probe ->
+                if (probe.isOpen) {
+                    bleGattController.log("PORT", ">> [OPEN] Port ${probe.port} (${probe.serviceName}) Latency: ${probe.latencyMs}ms ${probe.banner ?: ""}", com.example.model.LogLevel.SUCCESS)
+                }
+                _portScanResults.update { current -> current + probe }
+            }
+            val openCount = results.count { it.isOpen }
+            bleGattController.log("PORT", "Port sweep completed. Found $openCount open listening services.", if (openCount > 0) com.example.model.LogLevel.SUCCESS else com.example.model.LogLevel.WARNING)
+            _isPortScanning.value = false
+        }
+    }
+
+    fun getDecodedBeacon(device: TrackedDevice): BeaconDecodedData {
+        return BeaconPacketDecompiler.decompile(device.rawScanRecord, device.macAddress, device.rssi)
     }
 
     private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -211,7 +287,9 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
                 customAlias = customAlias,
                 latitude = _currentLocation.value?.latitude,
                 longitude = _currentLocation.value?.longitude,
-                lastSeenTimestamp = System.currentTimeMillis()
+                lastSeenTimestamp = System.currentTimeMillis(),
+                rawScanRecord = result.scanRecord?.bytes,
+                serviceUuids = result.scanRecord?.serviceUuids?.map { it.toString() } ?: emptyList()
             )
 
             _devices.update { current ->

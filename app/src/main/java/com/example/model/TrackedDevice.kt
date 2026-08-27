@@ -21,7 +21,11 @@ data class TrackedDevice(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val lastSeenTimestamp: Long = System.currentTimeMillis(),
-    val isSecure: Boolean? = null
+    val isSecure: Boolean? = null,
+    val rawScanRecord: ByteArray? = null,
+    val serviceUuids: List<String> = emptyList(),
+    val ipAddress: String? = null,
+    val wifiFrequency: Int? = null
 ) {
     val displayName: String
         get() = customAlias?.takeIf { it.isNotBlank() } ?: name.ifBlank { 

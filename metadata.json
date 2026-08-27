@@ -1,6 +1,6 @@
 {
   "name": "Oni Song Tracker",
-  "description": "Locate and track nearby Bluetooth devices with radar and compass views.",
+  "description": "Locate and track nearby Bluetooth and Wi-Fi nodes with real-time Sonar Epicenter map, tactical 360° radar, and Watch Dogs styled NetSec Cyber Deck.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -18,6 +18,16 @@
     <!-- Haptic feedback for security alerts -->
     <uses-permission android:name="android.permission.VIBRATE" />
     
+    <!-- Local Subnet & Port Probing, Wi-Fi State -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    
+    <!-- Flashlight & Hardware Beacon Integration -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    
     <!-- Optional feature declarations -->
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />

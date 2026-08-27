@@ -15,5 +15,9 @@ data class FilterSettings(
 data class GeneralSettings(
     val hapticFeedback: Boolean = true,
     val flashlightAlert: Boolean = false,
-    val backgroundScanning: Boolean = false
+    val backgroundScanning: Boolean = false,
+    val sonarSoundEnabled: Boolean = true,
+    val sonarEpicenterAutoFollow: Boolean = true,
+    val sonarSweepAnimation: Boolean = true,
+    val geigerAudioEnabled: Boolean = false
 )

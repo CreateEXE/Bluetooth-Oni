@@ -7,18 +7,19 @@ import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme =
   darkColorScheme(
-    primary = OniRed,
-    secondary = OniNeonBlue,
-    tertiary = OniDarkRed,
+    primary = OniNeonBlue,
+    secondary = OniNeonGreen,
+    tertiary = OniRed,
     background = OniBlack,
     surface = OniDarkSurface,
-    onPrimary = Color.White,
+    surfaceVariant = OniSurfaceVariant,
+    onPrimary = Color.Black,
     onSecondary = Color.Black,
     onTertiary = Color.White,
-    onBackground = Color.White,
-    onSurface = Color.White,
-    surfaceVariant = Color(0xFF2C2C2C),
-    onSurfaceVariant = Color.LightGray
+    onBackground = Color(0xFFF1F5F9),
+    onSurface = Color(0xFFF1F5F9),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = OniDarkBorder
   )
 
 @Composable
