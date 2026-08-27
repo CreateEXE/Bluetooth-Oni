@@ -203,9 +203,9 @@ fun CompassScreen(viewModel: BluetoothTrackerViewModel) {
             
             val isEstimated = estimatedBearings.containsKey(target.macAddress)
             val instructionText = if (isEstimated) {
-                "Distance stabilized. 3D arrow points in the estimated direction based on your movement.\nPro Tip: Use \"Body Shadowing\" (hold phone to chest and turn around). The arrow glows brighter when your body isn't blocking the signal."
+                "Distance stabilized. 3D arrow points in the estimated direction based on your movement.\nWalk towards the strongest signal pulse to locate the device."
             } else {
-                "Distance stabilized with Kalman filter.\nWalk around slowly to calibrate the tracking algorithm.\nPro Tip: Use \"Body Shadowing\" (hold phone to chest and turn around). The compass pulse is strongest when facing the device."
+                "Distance stabilized with Kalman filter.\nWalk around slowly to calibrate the tracking algorithm.\nWalk towards the strongest signal pulse to locate the device."
             }
             Text(
                 instructionText,

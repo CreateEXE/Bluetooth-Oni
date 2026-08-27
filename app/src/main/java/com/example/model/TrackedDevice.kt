@@ -8,6 +8,8 @@ data class TrackedDevice(
     val majorDeviceClass: Int,
     val isConnectable: Boolean,
     val deviceCategory: DeviceCategory,
+    val vendor: String = "Generic",
+    val txPower: Int = -59,
     val customAlias: String? = null
 ) {
     val displayName: String

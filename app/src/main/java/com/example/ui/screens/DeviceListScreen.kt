@@ -148,6 +148,11 @@ fun DeviceCard(device: TrackedDevice, onEditAlias: () -> Unit, onClick: () -> Un
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                    text = "Vendor: ${device.vendor}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
             }
             Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
                 Text(

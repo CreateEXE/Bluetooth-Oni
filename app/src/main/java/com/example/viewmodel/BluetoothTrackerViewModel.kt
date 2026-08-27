@@ -122,7 +122,8 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
             // Calculate distance based on smoothed RSSI
             
             // Calculate distance based on smoothed RSSI
-            val distance = GeoUtils.calculateDistance(finalRssi.toInt())
+            val vendorProfile = com.example.util.OuiLookup.getProfile(address)
+            val distance = GeoUtils.calculateDistance(finalRssi.toInt(), vendorProfile.txPower)
             
             // Pseudo-Direction Estimation Heuristic (Hot/Cold Trilateration over time)
             val prevDist = previousDistances[address]
@@ -184,6 +185,8 @@ class BluetoothTrackerViewModel(application: Application) : AndroidViewModel(app
                 majorDeviceClass = majorClass,
                 isConnectable = isConnectable,
                 deviceCategory = deviceCategory,
+                vendor = vendorProfile.name,
+                txPower = vendorProfile.txPower,
                 customAlias = customAlias
             )
 
